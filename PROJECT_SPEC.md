@@ -99,7 +99,7 @@ Class has unreliable internet and little time, so **saving must never wait for t
 
 - OAuth scope: **`https://www.googleapis.com/auth/drive.file` only**. The app can only see files/folders it created. Do not request broader scopes.
 - Without a backend, the access token lasts about **1 hour**. Implement silent re-request of the token (`prompt: ''`) and a visible **"Reconnect Google Drive"** button when silent renewal fails. Offline saving must keep working even when signed out.
-- The Google Client ID is a public value and goes in `.env` as `VITE_GOOGLE_CLIENT_ID`. Never put a client secret in the project.
+- Set `VITE_GOOGLE_CLIENT_ID` in a local, untracked `.env` file and in the deployment build environment. Do not commit environment files or Google client secrets.
 
 ---
 
@@ -199,7 +199,7 @@ src/
 3. Configure the **OAuth consent screen** (External, add the user's own Gmail as a **test user**; no verification is needed for personal use with `drive.file`).
 4. Create **OAuth Client ID** → type **Web application**.
 5. Add **Authorized JavaScript origins**: `http://localhost:5173` and the final hosted URL (GitHub Pages/Netlify).
-6. Copy the Client ID into `.env` as `VITE_GOOGLE_CLIENT_ID`.
+6. Add the Client ID to your local `.env` as `VITE_GOOGLE_CLIENT_ID`; configure the same variable in your deployment environment before building.
 
 Note: apps in "Testing" mode may require re-consent after a period; mention this if sign-in starts failing.
 

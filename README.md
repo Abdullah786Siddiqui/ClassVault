@@ -1,5 +1,18 @@
-# Vue 3 + Vite
+# ClassVault
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+ClassVault is an offline-first study-space PWA for organizing semester notes, photos, and files, with optional Google Drive sync.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+## Configure Google Drive
+
+Copy `.env.example` to `.env` and set `VITE_GOOGLE_CLIENT_ID` to your Google OAuth web client ID. Keep `.env` local; environment files are excluded from Git.
+
+For production, provide `VITE_GOOGLE_CLIENT_ID` to the build environment (for example, as a GitHub Actions repository variable) before running `npm run build`. Vite embeds this value in the generated client bundle, so it must be available at build time.
+
+If the variable is not set, ClassVault continues to work locally and offline, but Google Drive connection is unavailable.
+
+## Development
+
+```sh
+npm install
+npm run dev
+```

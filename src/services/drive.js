@@ -100,7 +100,10 @@ export async function ensureGoogleAvailable() {
   }
 
   if (!getClientId()) {
-    return { ok: false, message: 'Google Drive is not configured yet. Add VITE_GOOGLE_CLIENT_ID to .env.' }
+    return {
+      ok: false,
+      message: 'Google Drive is not configured for this build. Add VITE_GOOGLE_CLIENT_ID in Cloudflare Pages settings and redeploy.',
+    }
   }
 
   try {

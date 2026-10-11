@@ -24,7 +24,7 @@ export async function connectGoogleDrive({ forcePrompt = false } = {}) {
   if (!googleClientIdConfigured()) {
     return {
       ok: false,
-      message: 'Google Drive is not configured yet. Add VITE_GOOGLE_CLIENT_ID to .env.',
+      message: 'Google Drive is not configured for this build. Add VITE_GOOGLE_CLIENT_ID in Cloudflare Pages settings and redeploy.',
     }
   }
 

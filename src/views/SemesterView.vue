@@ -10,7 +10,7 @@ import BaseButton from '../components/ui/BaseButton.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 import BottomSheet from '../components/ui/BottomSheet.vue'
-import { Plus, BookOpen, Calendar } from '../components/ui/icons.js'
+import { Plus, BookOpen, Calendar, Folder } from '../components/ui/icons.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,6 +19,8 @@ const toast = useToast()
 
 const subjectName = ref('')
 const isAddingSubject = ref(false)
+const isManagingSubjects = ref(false)
+const isSavingSubject = ref(false)
 const subjectToDelete = ref(null)
 const subjectToRename = ref(null)
 const renameName = ref('')
@@ -92,15 +94,17 @@ async function handleAddSubject() {
   const name = subjectName.value.trim()
   if (!name) return
 
+  isSavingSubject.value = true
   try {
     const id = await semesterStore.addSubject(route.params.semesterId, name)
     if (id) {
       subjectName.value = ''
-      isAddingSubject.value = false
       toast.success(`Added subject "${name}"`)
     }
   } catch (err) {
     toast.error(err.message || 'Failed to add subject')
+  } finally {
+    isSavingSubject.value = false
   }
 }
 
@@ -156,29 +160,28 @@ async function confirmDeleteSubject() {
             <Plus class="h-4 w-4" />
             <span>Add Term</span>
           </BaseButton>
-          <BaseButton variant="secondary" size="sm" @click="isAddingSubject = true">
-            <Plus class="h-4 w-4" />
-            <span>Add Subject</span>
+          <BaseButton variant="secondary" size="sm" @click="isManagingSubjects = true">
+            <Folder class="h-4 w-4" />
+            <span>Manage subjects</span>
           </BaseButton>
         </div>
       </template>
     </PageHeader>
 
     <!-- Terms Section -->
-    <section class="mb-8">
-      <div class="mb-3 flex items-center justify-between gap-3">
+    <section class="mb-6 sm:mb-8">
+      <div class="mb-3">
         <div>
-          <h2 class="text-xs font-bold uppercase tracking-wider" style="color: var(--color-text-faint)">
-            Semester Terms ({{ currentExams.length }})
+          <h2 class="text-base font-bold tracking-tight text-slate-900 dark:text-white sm:text-lg">
+            Terms &amp; exams
           </h2>
-          <p class="text-[11px] text-slate-500 dark:text-slate-400">
-            Terms like Mid Term, Final Term, or Quizzes
+          <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Choose a term to open its subjects and study materials.
           </p>
         </div>
-
       </div>
 
-      <div v-if="currentExams.length" class="grid gap-4 sm:grid-cols-2">
+      <div v-if="currentExams.length" class="grid gap-3 sm:grid-cols-2 sm:gap-4">
         <ExamCard
           v-for="examItem in currentExams"
           :key="examItem.id"
@@ -194,7 +197,7 @@ async function confirmDeleteSubject() {
       <!-- Clean Empty State if no terms added yet -->
       <div
         v-else
-        class="rounded-3xl border border-dashed border-indigo-200 bg-indigo-50/50 p-6 sm:p-8 text-center dark:border-indigo-900/40 dark:bg-indigo-950/20"
+        class="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/50 p-5 text-center dark:border-indigo-900/40 dark:bg-indigo-950/20 sm:rounded-3xl sm:p-8"
       >
         <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600 dark:bg-indigo-900/60 dark:text-indigo-400">
           <Calendar class="h-6 w-6" />
@@ -214,75 +217,98 @@ async function confirmDeleteSubject() {
       </div>
     </section>
 
-    <!-- Subjects Section -->
-    <section class="rounded-3xl border border-slate-200/90 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 sm:p-6">
-      <div class="mb-4 flex items-center justify-between gap-3">
+    <p class="mb-2 text-xs text-slate-500 dark:text-slate-400">
+      {{ subjectList.length }} {{ subjectList.length === 1 ? 'subject is' : 'subjects are' }} shared across this semester's terms.
+      <button
+        type="button"
+        class="font-bold text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+        @click="isManagingSubjects = true"
+      >
+        Manage subjects
+      </button>
+    </p>
+
+    <BottomSheet
+      :open="isManagingSubjects"
+      title="Manage subjects"
+      @close="isManagingSubjects = false; isAddingSubject = false; subjectName = ''"
+    >
+      <div class="space-y-4">
         <div>
-          <h2 class="text-lg font-bold text-slate-900 dark:text-white">
-            Semester Subjects ({{ subjectList.length }})
-          </h2>
-          <p class="text-xs text-slate-400 dark:text-slate-500">
-            Subjects studied this semester, shared across all terms
+          <p class="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            {{ semester?.name }}
+          </p>
+          <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Subjects are shared across every term in this semester.
           </p>
         </div>
 
-      </div>
+        <form
+          v-if="isAddingSubject"
+          class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60"
+          @submit.prevent="handleAddSubject"
+        >
+          <BaseInput
+            v-model="subjectName"
+            label="Subject name"
+            placeholder="e.g. Biology"
+            required
+            autofocus
+          />
+          <div class="flex gap-2">
+            <BaseButton
+              type="button"
+              variant="secondary"
+              block
+              @click="isAddingSubject = false; subjectName = ''"
+            >
+              Cancel
+            </BaseButton>
+            <BaseButton
+              type="submit"
+              variant="primary"
+              block
+              :loading="isSavingSubject"
+              :disabled="!subjectName.trim()"
+            >
+              Add subject
+            </BaseButton>
+          </div>
+        </form>
 
-      <!-- Quick Add Input Form -->
-      <form
-        v-if="isAddingSubject"
-        class="mb-4 flex flex-col gap-2.5 rounded-2xl bg-slate-50 p-3 dark:bg-slate-800/60"
-        @submit.prevent="handleAddSubject"
-      >
-        <BaseInput
-          v-model="subjectName"
-          label="Subject Name"
-          placeholder="e.g. Operating Systems, Data Structures, Calculus"
-          required
-          autofocus
-        />
-        <div class="flex justify-end gap-2 pt-1">
-          <BaseButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            @click="isAddingSubject = false; subjectName = ''"
-          >
-            Cancel
-          </BaseButton>
-          <BaseButton
-            type="submit"
-            variant="primary"
-            size="sm"
-            :disabled="!subjectName.trim()"
-          >
-            Save Subject
-          </BaseButton>
-        </div>
-      </form>
-
-      <!-- Subject List -->
-      <div v-if="subjectList.length" class="space-y-2">
-        <SubjectCard
-          v-for="sub in subjectList"
-          :key="sub.id"
-          :subject="sub"
-          @rename="handleRenamePrompt"
-          @delete="handleDeletePrompt"
-        />
-      </div>
-
-      <div
-        v-else
-        class="rounded-2xl border border-dashed border-slate-200 p-6 text-center dark:border-slate-800"
-      >
-        <p class="text-xs font-semibold text-slate-500">No subjects added yet.</p>
-        <BaseButton variant="primary" size="sm" class="mt-3" @click="isAddingSubject = true">
+        <BaseButton
+          v-else
+          variant="primary"
+          block
+          @click="isAddingSubject = true"
+        >
           <Plus class="h-4 w-4" />
-          <span>Add Subject</span>
+          Add subject
         </BaseButton>
+
+        <div v-if="subjectList.length" class="space-y-2">
+          <SubjectCard
+            v-for="sub in subjectList"
+            :key="sub.id"
+            :subject="sub"
+            :interactive="false"
+            actions-always-visible
+            @rename="handleRenamePrompt"
+            @delete="handleDeletePrompt"
+          />
+        </div>
+
+        <div
+          v-else
+          class="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center dark:border-slate-800"
+        >
+          <p class="text-sm font-semibold text-slate-700 dark:text-slate-200">No subjects yet</p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Add subjects here, then open a term to start organizing study materials.
+          </p>
+        </div>
       </div>
-    </section>
+    </BottomSheet>
 
     <!-- Add Term BottomSheet -->
     <BottomSheet

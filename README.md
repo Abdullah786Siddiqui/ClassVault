@@ -2,6 +2,8 @@
 
 ClassVault is an offline-first study-space PWA for organizing semester notes, photos, and files, with optional Google Drive sync.
 
+When connected, the app reconciles its ClassVault Drive folder on startup, manual sync, and when returning to the app. New or updated Drive files are reflected locally, and locally mirrored files removed from Drive are removed from the app; unsynced local items are kept.
+
 ## Configure Google Drive
 
 Copy `.env.example` to `.env` and set `VITE_GOOGLE_CLIENT_ID` to your Google OAuth web client ID for local development. Keep `.env` local; environment files are excluded from Git.

@@ -94,10 +94,11 @@ export const useAuthStore = defineStore('auth', {
       this.status = 'Google Drive ready'
 
       const syncStore = useSyncStore()
-      await syncStore.refreshCounts()
-      await syncStore.syncNow()
+      const syncResult = await syncStore.syncNow()
 
-      return result
+      return syncResult.mirrorError
+        ? { ...result, mirrorError: syncResult.mirrorError }
+        : result
     },
 
     async refreshPendingCount() {

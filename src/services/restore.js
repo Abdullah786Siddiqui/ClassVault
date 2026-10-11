@@ -2,9 +2,8 @@ import db from './db'
 import {
   downloadDriveFile,
   getDriveAccessToken,
-  listAllDriveFiles,
+  listDriveFiles,
 } from './drive'
-import { slugifyExam } from '../utils/sanitize'
 
 const ROOT_FOLDER_NAMES = new Set(['classvault', 'class notes vault'])
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
@@ -65,7 +64,10 @@ async function ensureExam(semester, examName, examIdHint) {
   )
   if (match) return match
 
-  const baseId = examIdHint || slugifyExam(examName)
+  const baseId =
+    examIdHint ||
+    examName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') ||
+    'exam'
   const uniqueId = exams.some((exam) => exam.id === baseId) ? `${baseId}-${Date.now()}` : baseId
   const created = { id: uniqueId, name: examName }
   exams.push(created)
@@ -95,17 +97,21 @@ export async function restoreLibraryFromDrive() {
     return { ok: false, reason: auth.message || 'Connect Google Drive to restore your library.' }
   }
 
-  const files = await listAllDriveFiles(auth.accessToken)
-  if (!files.length) {
-    return { ok: true, imported: 0, skipped: 0, total: 0 }
-  }
+  const files = await listDriveFiles(auth.accessToken)
 
   const byId = new Map(files.map((file) => [file.id, file]))
-  const existingByDriveId = new Set(
-    (await db.items.toArray()).map((item) => item.driveFileId).filter(Boolean),
+  const localItems = await db.items.toArray()
+  const existingByDriveId = new Map(
+    localItems.filter((item) => item.driveFileId).map((item) => [item.driveFileId, item]),
   )
+  const driveItems = files.filter((file) => {
+    if (!file?.id || file.mimeType === FOLDER_MIME) return false
+    return isVaultPath(buildPathNames(file, byId))
+  })
+  const liveDriveIds = new Set(driveItems.map((file) => file.id))
 
   let imported = 0
+  let updated = 0
   let skipped = 0
 
   for (const file of files) {
@@ -113,11 +119,6 @@ export async function restoreLibraryFromDrive() {
       skipped += 1
       continue
     }
-    if (existingByDriveId.has(file.id)) {
-      skipped += 1
-      continue
-    }
-
     const names = buildPathNames(file, byId)
     if (!isVaultPath(names)) {
       skipped += 1
@@ -134,15 +135,56 @@ export async function restoreLibraryFromDrive() {
     const exam = await ensureExam(semester, examName, examHint)
     const subject = await ensureSubject(semester.id, subjectName)
 
-    let text = file.description || ''
-    if (type === 'text' && (file.size == null || Number(file.size) < 120000)) {
-      try {
-        const blob = await downloadDriveFile(file.id, auth.accessToken)
-        text = await blob.text()
-      } catch {
-        text = file.description || ''
+    const existing = existingByDriveId.get(file.id)
+    if (existing) {
+      const metadataChanged =
+        (file.name && file.name !== existing.fileName) ||
+        (file.mimeType && file.mimeType !== existing.mimeType) ||
+        (Number(file.size) || 0) !== (Number(existing.fileSize) || 0) ||
+        (file.modifiedTime && file.modifiedTime !== existing.driveModifiedTime) ||
+        existing.semesterId !== Number(semester.id) ||
+        existing.subjectId !== Number(subject.id) ||
+        existing.exam !== exam.id
+
+      if (metadataChanged) {
+        const text = type === 'text'
+          ? await (await downloadDriveFile(file.id, auth.accessToken)).text()
+          : existing.text
+
+        await db.items.update(existing.id, {
+          semesterId: Number(semester.id),
+          subjectId: Number(subject.id),
+          exam: exam.id,
+          type,
+          title: type === 'text' ? file.name.replace(/\.txt$/i, '') : file.name,
+          text,
+          caption: file.description || '',
+          fileName: file.name,
+          mimeType: file.mimeType || '',
+          fileSize: Number(file.size) || 0,
+          starred:
+            file.appProperties?.starred === '1'
+              ? 1
+              : file.appProperties?.starred === '0'
+                ? 0
+                : existing.starred,
+          driveModifiedTime: file.modifiedTime || existing.driveModifiedTime || '',
+          updatedAt: file.modifiedTime || existing.updatedAt,
+          blob: null,
+          thumbBlob: null,
+        })
+
+        if (type !== 'text') await db.filesCache.delete(file.id)
+        updated += 1
+      } else {
+        skipped += 1
       }
+      continue
     }
+
+    const text = type === 'text'
+      ? await (await downloadDriveFile(file.id, auth.accessToken)).text()
+      : ''
 
     await db.items.add({
       semesterId: Number(semester.id),
@@ -160,6 +202,7 @@ export async function restoreLibraryFromDrive() {
       starred: file.appProperties?.starred === '1' ? 1 : 0,
       syncStatus: 'synced',
       driveFileId: file.id,
+      driveModifiedTime: file.modifiedTime || '',
       errorMessage: '',
       retryAt: 0,
       retryCount: 0,
@@ -167,9 +210,32 @@ export async function restoreLibraryFromDrive() {
       updatedAt: file.modifiedTime || new Date().toISOString(),
     })
 
-    existingByDriveId.add(file.id)
+    existingByDriveId.set(file.id, { id: file.id, driveFileId: file.id })
     imported += 1
   }
 
-  return { ok: true, imported, skipped, total: files.length }
+  const removedItems = localItems.filter(
+    (item) =>
+      item.syncStatus === 'synced' &&
+      item.driveFileId &&
+      !liveDriveIds.has(item.driveFileId),
+  )
+
+  if (removedItems.length) {
+    await db.transaction('rw', db.items, db.filesCache, async () => {
+      for (const item of removedItems) {
+        await db.items.delete(item.id)
+        await db.filesCache.delete(item.driveFileId)
+      }
+    })
+  }
+
+  return {
+    ok: true,
+    imported,
+    updated,
+    removed: removedItems.length,
+    skipped,
+    total: files.length,
+  }
 }

@@ -81,9 +81,9 @@ async function confirmDeleteSemester() {
     <!-- Welcome Hero -->
     <section class="library-welcome">
       <div class="library-welcome-copy">
-        <p class="library-eyebrow">YOUR PERSONAL STUDY SPACE</p>
-        <h1>Make room for what matters.</h1>
-        <p>Keep lecture notes, class photos, and handouts together—organized by semester and ready when you are.</p>
+        <p class="library-eyebrow">YOUR STUDY LIBRARY</p>
+        <h1>Your studies, all in one place.</h1>
+        <p>Keep notes, class photos, and handouts organized by semester. Find what you need and pick up where you left off.</p>
       </div>
       <div class="library-welcome-art" aria-hidden="true">
         <i class="fa-solid fa-book-open"></i>

@@ -245,6 +245,7 @@ export async function syncPendingItems(onProgress) {
           await db.items.update(item.id, {
             syncStatus: 'synced',
             driveFileId: result.id,
+            driveModifiedTime: result.modifiedTime || '',
             errorMessage: '',
             retryAt: 0,
             retryCount: 0,

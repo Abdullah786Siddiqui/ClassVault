@@ -344,7 +344,7 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
       console.log(`[ClassVault Drive] File "${safeName}" already exists in Drive (${existingId}). Updating existing file instead of creating duplicate.`)
       // Update existing file's media to prevent duplicate files
       const updateRes = await fetch(
-        `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media`,
+        `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media&fields=id,name,modifiedTime`,
         {
           method: 'PATCH',
           headers: {
@@ -355,7 +355,7 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
         },
       )
       if (updateRes.ok) {
-        return { id: existingId, name: safeName, updated: true }
+        return { ...(await updateRes.json()), updated: true }
       }
     }
   } catch (err) {
@@ -373,6 +373,7 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
       starred: item.starred ? '1' : '0',
       syncStatus: 'synced',
       type: item.type || 'file',
+      exam: item.exam || '',
     },
   }
 
@@ -384,7 +385,7 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
   formData.append('file', payloadBlob)
 
   const response = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,modifiedTime',
     {
       method: 'POST',
       headers: {
@@ -486,20 +487,34 @@ export async function getDriveAbout(accessToken) {
 }
 
 /**
- * List all non-trashed files and folders under ClassVault in Google Drive.
- * Directly fulfills requirement: "isko pora google drive ka data show ho yaha pr".
+ * List all non-trashed files and folders visible to this app.
+ * The restore service filters this list to the ClassVault folder.
  */
 export async function listDriveFiles(accessToken) {
-  if (!accessToken) return []
-  try {
+  if (!accessToken) {
+    throw new Error('Google Drive access token is required to list files.')
+  }
+
+  const files = []
+  let pageToken = ''
+
+  do {
+    const params = new URLSearchParams({
+      q: 'trashed=false',
+      fields: 'nextPageToken,files(id,name,mimeType,size,modifiedTime,webViewLink,parents,description,appProperties)',
+      orderBy: 'folder,name',
+      pageSize: '1000',
+    })
+    if (pageToken) params.set('pageToken', pageToken)
+
     const response = await requestDriveUrl(
-      "https://www.googleapis.com/drive/v3/files?q=trashed=false&fields=files(id,name,mimeType,size,modifiedTime,webViewLink,parents)&orderBy=folder,name&pageSize=100",
+      `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
       accessToken,
     )
     const data = await response.json()
-    return data.files || []
-  } catch (error) {
-    console.warn(`[ClassVault Drive] Failed to list Drive files:`, error)
-    return []
-  }
+    files.push(...(data.files || []))
+    pageToken = data.nextPageToken || ''
+  } while (pageToken)
+
+  return files
 }

@@ -7,6 +7,9 @@ import {
   fetchDriveFileOnDemand,
   recoverStuckUploadingItems,
 } from '../services/sync'
+import { restoreLibraryFromDrive } from '../services/restore'
+import { useItemStore } from './items'
+import { useSemesterStore } from './semesters'
 
 export const useSyncStore = defineStore('sync', {
   state: () => ({
@@ -40,17 +43,44 @@ export const useSyncStore = defineStore('sync', {
       this.errorMessage = null
 
       try {
-        const result = await syncPendingItems((progress) => {
+        const uploadResult = await syncPendingItems((progress) => {
           this.syncProgress = progress
         })
 
-        if (result.ok) {
+        let result = uploadResult
+        if (uploadResult.ok && navigator.onLine) {
+          try {
+            const mirrorResult = await restoreLibraryFromDrive()
+            if (!mirrorResult.ok) {
+              result = { ...uploadResult, mirrorError: mirrorResult.reason }
+              this.errorMessage = mirrorResult.reason || 'Could not refresh the Google Drive library.'
+            } else {
+              result = { ...uploadResult, mirror: mirrorResult }
+              const itemStore = useItemStore()
+              const { semesterId, subjectId, exam } = itemStore.currentContext
+              await Promise.all([
+                semesterId && subjectId && exam
+                  ? itemStore.loadSubjectItems(semesterId, subjectId, exam)
+                  : Promise.resolve(),
+                useSemesterStore().load(),
+              ])
+            }
+          } catch (error) {
+            result = {
+              ...uploadResult,
+              mirrorError: error.message || 'Could not refresh the Google Drive library.',
+            }
+            this.errorMessage = result.mirrorError
+          }
+        }
+
+        if (result.ok && !result.mirrorError) {
           this.lastSync = new Date().toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
           })
           await this.refreshCounts()
-        } else {
+        } else if (!result.ok) {
           this.errorMessage = result.reason || 'Sync error'
         }
         return result

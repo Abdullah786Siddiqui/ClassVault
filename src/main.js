@@ -30,3 +30,12 @@ window.addEventListener('online', async () => {
     await syncStore.syncNow()
   }
 })
+
+// Refresh the local Drive mirror when returning to the app after Drive changes.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && navigator.onLine && authStore.signedIn) {
+    useSyncStore(pinia).syncNow().catch((error) => {
+      console.error('[ClassVault] Failed to refresh the Drive mirror:', error)
+    })
+  }
+})

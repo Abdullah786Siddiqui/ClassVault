@@ -44,6 +44,9 @@ const statusTitle = computed(() => {
     }
     return 'Syncing to Drive...'
   }
+  if (syncStore.errorMessage) {
+    return 'Could not refresh Google Drive'
+  }
   if (failedCount.value > 0) {
     return `${failedCount.value} ${failedCount.value === 1 ? 'item' : 'items'} failed to upload`
   }
@@ -64,6 +67,9 @@ const statusSubtitle = computed(() => {
   if (!isOnline.value) {
     return 'Internet disconnected · Will sync when connection restores'
   }
+  if (syncStore.errorMessage) {
+    return syncStore.errorMessage
+  }
   if (failedCount.value > 0) {
     return 'Could not upload some items · Tap retry to try again'
   }
@@ -76,6 +82,7 @@ const statusSubtitle = computed(() => {
 const statusIcon = computed(() => {
   if (!isOnline.value) return CloudOff
   if (!authStore.signedIn) return Cloud
+  if (syncStore.errorMessage) return AlertTriangle
   if (failedCount.value > 0) return AlertTriangle
   if (syncStore.isSyncing || pendingCount.value > 0) return RefreshCw
   return CheckCircle2
@@ -85,6 +92,9 @@ async function handleConnect() {
   const result = await authStore.connectGoogle()
   if (result.ok) {
     toast.success('Connected to Google Drive')
+    if (result.mirrorError) {
+      toast.error(`Connected, but the Drive library could not refresh: ${result.mirrorError}`)
+    }
   } else {
     toast.error(result.message || 'Google Drive connection failed')
   }
@@ -102,7 +112,9 @@ async function handleSyncNow() {
 
   try {
     const result = await syncStore.syncNow()
-    if (result.ok) {
+    if (result.mirrorError) {
+      toast.error(`Drive upload finished, but the library could not refresh: ${result.mirrorError}`)
+    } else if (result.ok) {
       toast.success(result.uploaded ? `Synced ${result.uploaded} items to Drive` : 'All items are already in Drive')
     } else {
       toast.error(result.reason || 'Sync failed')
@@ -125,7 +137,9 @@ async function handleRetryFailed() {
   try {
     toast.info('Retrying uploads to Drive...')
     const result = await syncStore.retryFailed()
-    if (result.ok) {
+    if (result.mirrorError) {
+      toast.error(`Uploads finished, but the library could not refresh: ${result.mirrorError}`)
+    } else if (result.ok) {
       toast.success(result.uploaded ? `Successfully uploaded ${result.uploaded} items` : 'Retried successfully')
     } else {
       toast.error(result.reason || 'Retry failed')

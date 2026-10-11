@@ -5,8 +5,9 @@ import { buildDrivePath, sanitizeFileName } from '../utils/sanitize'
 // Single global in-flight sync lock (Fixes B4)
 let inFlightSyncPromise = null
 
-// Maximum files to keep cached in IndexedDB
+// Keep the on-demand cache bounded even when individual files are large.
 const MAX_CACHED_FILES = 20
+const MAX_CACHED_BYTES = 100 * 1024 * 1024
 
 function getFolderPath(item, semester, subject) {
   return buildDrivePath(semester.name, item.exam, subject.name)
@@ -68,6 +69,36 @@ function getRetryDelay(retryCount) {
  */
 export async function generateThumbnail(blob, maxDimension = 400) {
   if (!blob || !(blob instanceof Blob) || !blob.type.startsWith('image/')) {
+    return null
+  }
+
+  if (typeof createImageBitmap === 'function' && typeof OffscreenCanvas === 'function') {
+    try {
+      const image = await createImageBitmap(blob)
+      if (image.width <= maxDimension && image.height <= maxDimension) {
+        image.close()
+        return blob
+      }
+
+      const scale = Math.min(maxDimension / image.width, maxDimension / image.height)
+      const width = Math.round(image.width * scale)
+      const height = Math.round(image.height * scale)
+      const canvas = new OffscreenCanvas(width, height)
+      const context = canvas.getContext('2d')
+      if (!context) {
+        image.close()
+        return null
+      }
+
+      context.drawImage(image, 0, 0, width, height)
+      image.close()
+      return await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.75 })
+    } catch {
+      return null
+    }
+  }
+
+  if (typeof Image === 'undefined' || typeof document === 'undefined') {
     return null
   }
 
@@ -199,18 +230,29 @@ export async function syncPendingItems(onProgress) {
       let uploaded = 0
 
       for (let index = 0; index < itemsToSync.length; index++) {
-        const item = itemsToSync[index]
-
-        if (typeof onProgress === 'function') {
-          onProgress({ current: index + 1, total: itemsToSync.length, item })
-        }
+        const candidate = itemsToSync[index]
+        let item = candidate
 
         try {
-          // Mark item 'uploading' before starting (Fixes B4)
-          await db.items.update(item.id, {
-            syncStatus: 'uploading',
-            updatedAt: new Date().toISOString(),
+          item = await db.transaction('rw', db.items, async () => {
+            const current = await db.items.get(candidate.id)
+            if (!current || current.syncStatus === 'uploading' || current.syncStatus === 'synced') {
+              return null
+            }
+            if (current.syncStatus === 'failed' && current.retryAt && current.retryAt > Date.now()) {
+              return null
+            }
+            await db.items.update(current.id, {
+              syncStatus: 'uploading',
+              updatedAt: new Date().toISOString(),
+            })
+            return { ...current, syncStatus: 'uploading' }
           })
+          if (!item) continue
+
+          if (typeof onProgress === 'function') {
+            onProgress({ current: index + 1, total: itemsToSync.length, item })
+          }
 
           const semester = await db.semesters.get(item.semesterId)
           const subject = await db.subjects.get(item.subjectId)
@@ -328,12 +370,14 @@ export async function fetchDriveFileOnDemand(item) {
   })
 
   // 6. Enforce cache limit (MAX_CACHED_FILES)
-  const totalCached = await db.filesCache.count()
-  if (totalCached > MAX_CACHED_FILES) {
-    const oldest = await db.filesCache.orderBy('cachedAt').limit(totalCached - MAX_CACHED_FILES).toArray()
-    for (const entry of oldest) {
-      await db.filesCache.delete(entry.driveFileId)
-    }
+  const cachedFiles = await db.filesCache.orderBy('cachedAt').toArray()
+  let cachedBytes = cachedFiles.reduce((total, entry) => total + (entry.blob?.size || 0), 0)
+  let cachedCount = cachedFiles.length
+  for (const entry of cachedFiles) {
+    if (cachedCount <= MAX_CACHED_FILES && cachedBytes <= MAX_CACHED_BYTES) break
+    await db.filesCache.delete(entry.driveFileId)
+    cachedCount -= 1
+    cachedBytes -= entry.blob?.size || 0
   }
 
   return downloadedBlob

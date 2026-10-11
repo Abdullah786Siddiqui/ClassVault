@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import BaseButton from './BaseButton.vue'
 import { AlertTriangle } from './icons.js'
 
@@ -36,12 +36,46 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['confirm', 'cancel'])
+const cancelButton = ref(null)
+let previouslyFocusedElement = null
 
 function handleKeyDown(e) {
-  if (e.key === 'Escape' && props.open) {
+  if (!props.open) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
     emit('cancel')
+    return
+  }
+  if (e.key !== 'Tab') return
+
+  const dialog = document.querySelector('[role="alertdialog"]')
+  const focusable = dialog?.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled)')
+  if (!focusable?.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault()
+    first.focus()
   }
 }
+
+watch(
+  () => props.open,
+  async (isOpen) => {
+    if (isOpen) {
+      previouslyFocusedElement = document.activeElement
+      await nextTick()
+      cancelButton.value?.$el?.focus?.()
+    } else {
+      await nextTick()
+      previouslyFocusedElement?.focus?.()
+      previouslyFocusedElement = null
+    }
+  },
+)
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
@@ -57,7 +91,7 @@ onUnmounted(() => {
     <Transition name="fade">
       <div
         v-if="open"
-        class="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs"
+        class="fixed inset-0 z-[70] bg-slate-950/60 backdrop-blur-xs"
         aria-hidden="true"
         @click="emit('cancel')"
       />
@@ -68,8 +102,8 @@ onUnmounted(() => {
         v-if="open"
         role="alertdialog"
         aria-modal="true"
-        :aria-labelledby="title"
-        class="fixed top-1/2 left-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-900 sm:rounded-3xl sm:p-6"
+        aria-labelledby="confirm-dialog-title"
+        class="fixed top-1/2 left-1/2 z-[71] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-900 sm:rounded-3xl sm:p-6"
       >
         <div class="flex items-start gap-4">
           <div
@@ -79,7 +113,7 @@ onUnmounted(() => {
             <AlertTriangle class="h-6 w-6" />
           </div>
           <div class="flex-1">
-            <h3 class="text-base font-bold text-slate-900 dark:text-white">
+            <h3 id="confirm-dialog-title" class="text-base font-bold text-slate-900 dark:text-white">
               {{ title }}
             </h3>
             <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
@@ -93,6 +127,7 @@ onUnmounted(() => {
             variant="secondary"
             size="md"
             block
+            ref="cancelButton"
             @click="emit('cancel')"
           >
             {{ cancelText }}

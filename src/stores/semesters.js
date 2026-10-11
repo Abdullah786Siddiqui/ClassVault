@@ -1,11 +1,25 @@
 import { defineStore } from 'pinia'
 import db from '../services/db'
 import {
+  buildDrivePath,
   sanitizeSegment,
   isDuplicateSemesterName,
   isDuplicateSubjectName,
 } from '../utils/sanitize'
-import { getDriveAccessToken, deleteDriveFile } from '../services/drive'
+import { getDriveAccessToken, deleteDriveFile, renameDriveFolderPath } from '../services/drive'
+
+async function removeItemsLocally(items) {
+  for (const item of items) {
+    await db.items.delete(item.id)
+    if (item.driveFileId) await db.filesCache.delete(item.driveFileId)
+  }
+}
+
+function ensureItemsAreNotUploading(items) {
+  if (items.some((item) => item.syncStatus === 'uploading')) {
+    throw new Error('Wait for the current uploads to finish before deleting this section.')
+  }
+}
 
 export const useSemesterStore = defineStore('semester', {
   state: () => ({
@@ -24,17 +38,19 @@ export const useSemesterStore = defineStore('semester', {
   actions: {
     async load() {
       this.loading = true
-      const [rawSemesters, subjects] = await Promise.all([
-        db.semesters.orderBy('createdAt').reverse().toArray(),
-        db.subjects.orderBy('createdAt').toArray(),
-      ])
-      // Map semesters - no hardcoded exams/terms! Starts empty until student adds them.
-      this.semesters = rawSemesters.map((sem) => ({
-        ...sem,
-        exams: Array.isArray(sem.exams) ? sem.exams : [],
-      }))
-      this.subjects = subjects
-      this.loading = false
+      try {
+        const [rawSemesters, subjects] = await Promise.all([
+          db.semesters.orderBy('createdAt').reverse().toArray(),
+          db.subjects.orderBy('createdAt').toArray(),
+        ])
+        this.semesters = rawSemesters.map((sem) => ({
+          ...sem,
+          exams: Array.isArray(sem.exams) ? sem.exams : [],
+        }))
+        this.subjects = subjects
+      } finally {
+        this.loading = false
+      }
     },
 
     async addSemester(name) {
@@ -91,14 +107,17 @@ export const useSemesterStore = defineStore('semester', {
     async deleteExamFromSemester(semesterId, examId) {
       const semester = this.semesters.find((s) => s.id === Number(semesterId))
       if (!semester) return
+      const itemsToDelete = await db.items
+        .where({ semesterId: Number(semesterId), exam: examId })
+        .toArray()
+      ensureItemsAreNotUploading(itemsToDelete)
 
-      // 1. Delete all synced items for this exam from Google Drive
       try {
         const auth = await getDriveAccessToken()
+        if (!auth.ok && itemsToDelete.some((item) => item.driveFileId)) {
+          throw new Error(auth.message || 'Reconnect Google Drive before deleting these items.')
+        }
         if (auth.ok) {
-          const itemsToDelete = await db.items
-            .where({ semesterId: Number(semesterId), exam: examId })
-            .toArray()
           for (const it of itemsToDelete) {
             if (it.driveFileId) {
               await deleteDriveFile(it.driveFileId, auth.accessToken)
@@ -106,24 +125,26 @@ export const useSemesterStore = defineStore('semester', {
           }
         }
       } catch (err) {
-        console.warn('[ClassVault] Error deleting exam files from Drive:', err)
+        throw err
       }
 
-      // 2. Delete items locally
-      await db.items.where({ semesterId: Number(semesterId), exam: examId }).delete()
-
-      // 3. Remove exam from semester
       const updatedExams = (semester.exams || []).filter((e) => e.id !== examId)
-      await db.semesters.update(Number(semesterId), { exams: updatedExams })
+      await db.transaction('rw', db.semesters, db.items, db.filesCache, async () => {
+        await removeItemsLocally(itemsToDelete)
+        await db.semesters.update(Number(semesterId), { exams: updatedExams })
+      })
       await this.load()
     },
 
     async deleteSemester(id) {
-      // Delete all synced items from Google Drive (Fulfills requirement: "yaha se delete ho to waha se bhi delete ho")
+      const itemsToDelete = await db.items.where({ semesterId: Number(id) }).toArray()
+      ensureItemsAreNotUploading(itemsToDelete)
       try {
         const auth = await getDriveAccessToken()
+        if (!auth.ok && itemsToDelete.some((item) => item.driveFileId)) {
+          throw new Error(auth.message || 'Reconnect Google Drive before deleting these items.')
+        }
         if (auth.ok) {
-          const itemsToDelete = await db.items.where({ semesterId: Number(id) }).toArray()
           for (const it of itemsToDelete) {
             if (it.driveFileId) {
               await deleteDriveFile(it.driveFileId, auth.accessToken)
@@ -131,13 +152,13 @@ export const useSemesterStore = defineStore('semester', {
           }
         }
       } catch (err) {
-        console.warn('[ClassVault] Error deleting semester files from Google Drive:', err)
+        throw err
       }
 
-      await db.transaction('rw', db.semesters, db.subjects, db.items, async () => {
+      await db.transaction('rw', db.semesters, db.subjects, db.items, db.filesCache, async () => {
+        await removeItemsLocally(itemsToDelete)
         await db.semesters.delete(id)
         await db.subjects.where({ semesterId: id }).delete()
-        await db.items.where({ semesterId: id }).delete()
       })
       await this.load()
     },
@@ -163,11 +184,15 @@ export const useSemesterStore = defineStore('semester', {
     },
 
     async deleteSubject(id) {
+      const itemsToDelete = await db.items.where({ subjectId: Number(id) }).toArray()
+      ensureItemsAreNotUploading(itemsToDelete)
       // Delete all synced items of this subject from Google Drive
       try {
         const auth = await getDriveAccessToken()
+        if (!auth.ok && itemsToDelete.some((item) => item.driveFileId)) {
+          throw new Error(auth.message || 'Reconnect Google Drive before deleting these items.')
+        }
         if (auth.ok) {
-          const itemsToDelete = await db.items.where({ subjectId: Number(id) }).toArray()
           for (const it of itemsToDelete) {
             if (it.driveFileId) {
               await deleteDriveFile(it.driveFileId, auth.accessToken)
@@ -175,12 +200,12 @@ export const useSemesterStore = defineStore('semester', {
           }
         }
       } catch (err) {
-        console.warn('[ClassVault] Error deleting subject files from Google Drive:', err)
+        throw err
       }
 
-      await db.transaction('rw', db.subjects, db.items, async () => {
+      await db.transaction('rw', db.subjects, db.items, db.filesCache, async () => {
+        await removeItemsLocally(itemsToDelete)
         await db.subjects.delete(id)
-        await db.items.where({ subjectId: id }).delete()
       })
       await this.load()
     },
@@ -198,8 +223,13 @@ export const useSemesterStore = defineStore('semester', {
         throw new Error(`A subject named "${cleanName}" already exists in this semester`)
       }
 
-      // Note: Renaming a subject updates the local record. The existing Google Drive
-      // folder is not renamed to avoid breaking cached path references.
+      const semester = this.semesters.find((entry) => entry.id === target.semesterId)
+      for (const exam of semester?.exams || []) {
+        await renameDriveFolderPath(
+          buildDrivePath(semester.name, exam.name, target.name),
+          buildDrivePath(semester.name, exam.name, cleanName),
+        )
+      }
       await db.subjects.update(id, { name: cleanName })
       await this.load()
     },
@@ -214,8 +244,9 @@ export const useSemesterStore = defineStore('semester', {
         throw new Error(`A semester named "${cleanName}" already exists`)
       }
 
-      // Note: Renaming a semester locally updates the UI. Existing Google Drive
-      // folder path remains preserved.
+      const current = this.semesters.find((semester) => semester.id === Number(id))
+      if (!current) throw new Error('Semester not found.')
+      await renameDriveFolderPath(current.name, cleanName)
       await db.semesters.update(id, { name: cleanName })
       await this.load()
     },

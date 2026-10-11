@@ -6,12 +6,15 @@ export async function registerBackgroundSync() {
   }
 
   try {
+    const existingRegistration = await navigator.serviceWorker.getRegistration()
+    if (!existingRegistration) return false
     const registration = await navigator.serviceWorker.ready
     if ('sync' in registration) {
       await registration.sync.register(SYNC_TAG)
       return true
     }
-  } catch {
+  } catch (error) {
+    console.warn('[ClassVault] Background upload could not be scheduled:', error)
     return false
   }
 
@@ -24,7 +27,7 @@ export function listenForBackgroundSync(onSync) {
   }
 
   const handler = (event) => {
-    if (event.data?.type === 'CLASSVAULT_SYNC') {
+    if (event.data?.type === 'CLASSVAULT_SYNC_COMPLETED') {
       onSync?.()
     }
   }

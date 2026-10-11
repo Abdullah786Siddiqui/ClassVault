@@ -45,15 +45,18 @@ export const useItemStore = defineStore('items', {
         exam,
       }
 
-      const rawItems = await db.items
-        .where('[semesterId+subjectId+exam]')
-        .equals([Number(semesterId), Number(subjectId), exam])
-        .reverse()
-        .sortBy('createdAt')
+      try {
+        const rawItems = await db.items
+          .where('[semesterId+subjectId+exam]')
+          .equals([Number(semesterId), Number(subjectId), exam])
+          .reverse()
+          .sortBy('createdAt')
 
-      this.items = rawItems.map(wrapItemBlobs)
-      this.loading = false
-      return this.items
+        this.items = rawItems.map(wrapItemBlobs)
+        return this.items
+      } finally {
+        this.loading = false
+      }
     },
 
     /**
@@ -70,10 +73,13 @@ export const useItemStore = defineStore('items', {
       }
 
       this.loading = true
-      const rawItems = await db.items.orderBy('createdAt').reverse().toArray()
-      this.items = rawItems.map(wrapItemBlobs)
-      this.loading = false
-      return this.items
+      try {
+        const rawItems = await db.items.orderBy('createdAt').reverse().toArray()
+        this.items = rawItems.map(wrapItemBlobs)
+        return this.items
+      } finally {
+        this.loading = false
+      }
     },
 
     /**
@@ -87,66 +93,96 @@ export const useItemStore = defineStore('items', {
     },
 
     async addItem(payload) {
-      const cleanFileName = sanitizeFileName(payload.fileName || payload.title || 'item')
-      const targetTitle = (payload.title || '').trim()
+      const [id] = await this.addItems([payload])
+      return id
+    },
 
-      // Duplicate prevention: Check if item with same name exists under this section
-      const existingInSection = await db.items
-        .where('[semesterId+subjectId+exam]')
-        .equals([Number(payload.semesterId), Number(payload.subjectId), payload.exam])
-        .toArray()
+    async addItems(payloads) {
+      if (!Array.isArray(payloads) || !payloads.length) {
+        throw new Error('Select at least one item to save.')
+      }
 
-      const isDuplicate = existingInSection.some((it) => {
-        if (payload.type === 'text' && it.type === 'text') {
-          return it.title.trim().toLowerCase() === targetTitle.toLowerCase()
+      const first = payloads[0]
+      const semesterId = Number(first.semesterId)
+      const subjectId = Number(first.subjectId)
+      const exam = first.exam
+      if (
+        payloads.some(
+          (payload) =>
+            Number(payload.semesterId) !== semesterId ||
+            Number(payload.subjectId) !== subjectId ||
+            payload.exam !== exam,
+        )
+      ) {
+        throw new Error('All items in a batch must belong to the same subject and term.')
+      }
+
+      const ids = await db.transaction('rw', db.items, async () => {
+        const existingItems = await db.items
+          .where('[semesterId+subjectId+exam]')
+          .equals([semesterId, subjectId, exam])
+          .toArray()
+        const additions = []
+        const now = new Date().toISOString()
+
+        for (const payload of payloads) {
+          const cleanFileName = sanitizeFileName(payload.fileName || payload.title || 'item')
+          const targetTitle = (payload.title || '').trim()
+          const isDuplicate = [...existingItems, ...additions].some((item) => {
+            if (payload.type === 'text' && item.type === 'text') {
+              return item.title.trim().toLowerCase() === targetTitle.toLowerCase()
+            }
+            return (item.fileName || '').trim().toLowerCase() === cleanFileName.toLowerCase()
+          })
+
+          if (isDuplicate) {
+            throw new Error(`A file or note named "${cleanFileName}" already exists in this exam section.`)
+          }
+
+          const blob = payload.blob ? markRaw(payload.blob) : null
+          const thumbBlob = payload.thumbBlob ? markRaw(payload.thumbBlob) : null
+          additions.push({
+            semesterId,
+            subjectId,
+            exam,
+            type: payload.type,
+            title: payload.title || 'Untitled',
+            text: payload.text || '',
+            caption: payload.caption || '',
+            fileName: cleanFileName,
+            mimeType: payload.mimeType || '',
+            blob,
+            thumbBlob,
+            fileSize: payload.fileSize || blob?.size || 0,
+            starred: Number(Boolean(payload.starred)),
+            syncStatus: 'pending',
+            driveFileId: null,
+            errorMessage: '',
+            retryAt: 0,
+            retryCount: 0,
+            createdAt: now,
+            updatedAt: now,
+          })
         }
-        return (it.fileName || '').trim().toLowerCase() === cleanFileName.toLowerCase()
+
+        const addedIds = []
+        for (const item of additions) {
+          addedIds.push(await db.items.add(item))
+        }
+        return addedIds
       })
 
-      if (isDuplicate) {
-        throw new Error(`A file or note named "${cleanFileName}" already exists in this exam section.`)
-      }
-
-      const blob = payload.blob ? markRaw(payload.blob) : null
-      const thumbBlob = payload.thumbBlob ? markRaw(payload.thumbBlob) : null
-
-      const item = {
-        semesterId: Number(payload.semesterId),
-        subjectId: Number(payload.subjectId),
-        exam: payload.exam,
-        type: payload.type,
-        title: payload.title || 'Untitled',
-        text: payload.text || '',
-        caption: payload.caption || '',
-        fileName: cleanFileName,
-        mimeType: payload.mimeType || '',
-        blob,
-        thumbBlob,
-        fileSize: payload.fileSize || blob?.size || 0,
-        starred: Number(Boolean(payload.starred)),
-        syncStatus: 'pending',
-        driveFileId: null,
-        errorMessage: '',
-        retryAt: 0,
-        retryCount: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-
-      const id = await db.items.add(item)
-
-      // Refresh current view if we are on this subject
       if (
-        this.currentContext.semesterId === item.semesterId &&
-        this.currentContext.subjectId === item.subjectId &&
-        this.currentContext.exam === item.exam
+        this.currentContext.semesterId === semesterId &&
+        this.currentContext.subjectId === subjectId &&
+        this.currentContext.exam === exam
       ) {
-        await this.loadSubjectItems(item.semesterId, item.subjectId, item.exam)
+        await this.loadSubjectItems(semesterId, subjectId, exam)
       } else {
         await this.load()
       }
 
-      return id
+      return ids
     },
 
     async updateItem(id, changes) {
@@ -161,34 +197,56 @@ export const useItemStore = defineStore('items', {
         sanitizedChanges.thumbBlob = markRaw(sanitizedChanges.thumbBlob)
       }
 
-      await db.items.update(id, {
+      const existing = await db.items.get(id)
+      if (!existing) {
+        throw new Error('This item no longer exists.')
+      }
+      if (existing.syncStatus === 'uploading') {
+        throw new Error('Wait for the current upload to finish before editing this item.')
+      }
+
+      const updated = await db.items.update(id, {
         ...sanitizedChanges,
+        syncStatus: 'pending',
+        errorMessage: '',
+        retryAt: 0,
+        retryCount: 0,
         updatedAt: new Date().toISOString(),
       })
+      if (!updated) throw new Error('Could not update this item.')
 
       // Update in local state without full reload
       const index = this.items.findIndex((item) => item.id === id)
       if (index !== -1) {
-        this.items[index] = wrapItemBlobs({ ...this.items[index], ...sanitizedChanges })
+        const savedItem = await db.items.get(id)
+        this.items[index] = wrapItemBlobs(savedItem)
       }
     },
 
     async deleteItem(id) {
-      // Find item to check if it has been synced to Google Drive
       const item = await db.items.get(id)
+      if (item?.syncStatus === 'uploading') {
+        throw new Error('Wait for the current upload to finish before deleting this item.')
+      }
       if (item?.driveFileId) {
-        // Delete from Google Drive too!
-        try {
-          const auth = await getDriveAccessToken()
-          if (auth.ok) {
-            await deleteDriveFile(item.driveFileId, auth.accessToken)
-          }
-        } catch (err) {
-          console.warn('[ClassVault] Error deleting item from Google Drive:', err)
+        const auth = await getDriveAccessToken()
+        if (!auth.ok) {
+          throw new Error(auth.message || 'Reconnect Google Drive before deleting this item.')
         }
+        await deleteDriveFile(item.driveFileId, auth.accessToken)
       }
 
-      await db.items.delete(id)
+      await db.transaction('rw', db.items, db.filesCache, async () => {
+        const current = await db.items.get(id)
+        if (current?.syncStatus === 'uploading') {
+          throw new Error('Wait for the current upload to finish before deleting this item.')
+        }
+        if (current?.driveFileId && !item?.driveFileId) {
+          throw new Error('This item was just uploaded. Delete it again to remove the Drive copy.')
+        }
+        await db.items.delete(id)
+        if (current?.driveFileId) await db.filesCache.delete(current.driveFileId)
+      })
       this.items = this.items.filter((item) => item.id !== id)
     },
   },

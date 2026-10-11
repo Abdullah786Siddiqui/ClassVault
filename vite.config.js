@@ -14,15 +14,17 @@ export default defineConfig(({ mode }) => {
       vue(),
       tailwindcss(),
       VitePWA({
+        strategies: 'injectManifest',
+        srcDir: 'src',
+        filename: 'sw.js',
         registerType: 'autoUpdate',
         // Disable service worker in dev — avoids stale cache issues during development
         // To test PWA behavior, do `npm run build && npm run preview`
         devOptions: {
           enabled: false,
         },
-        workbox: {
+        injectManifest: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-          // Don't cache very large files (> 5MB) in the SW
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         },
         manifest: {

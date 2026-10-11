@@ -137,6 +137,11 @@ export async function restoreLibraryFromDrive() {
 
     const existing = existingByDriveId.get(file.id)
     if (existing) {
+      if (existing.syncStatus !== 'synced') {
+        skipped += 1
+        continue
+      }
+
       const metadataChanged =
         (file.name && file.name !== existing.fileName) ||
         (file.mimeType && file.mimeType !== existing.mimeType) ||

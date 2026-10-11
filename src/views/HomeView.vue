@@ -23,11 +23,22 @@ const newSemesterName = ref('')
 const isCreating = ref(false)
 const semesterToDelete = ref(null)
 const searchQuery = ref('')
+const isLoading = ref(true)
+const loadError = ref('')
 
-onMounted(async () => {
-  await semesterStore.load()
-  await authStore.refreshPendingCount()
-})
+async function loadHome() {
+  isLoading.value = true
+  loadError.value = ''
+  try {
+    await Promise.all([semesterStore.load(), authStore.refreshPendingCount()])
+  } catch (error) {
+    loadError.value = error?.message || 'Could not load your study library.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(loadHome)
 
 const filteredSemesters = computed(() => {
   if (!searchQuery.value.trim()) return semesterStore.semesters
@@ -67,9 +78,9 @@ async function confirmDeleteSemester() {
   const name = semesterToDelete.value.name
   try {
     await semesterStore.deleteSemester(semesterToDelete.value.id)
-    toast.success(`Deleted "${name}" (removed from device & Drive)`)
+    toast.success(`Deleted "${name}".`)
   } catch (err) {
-    toast.error('Failed to delete semester')
+    toast.error(err?.message || 'Failed to delete semester.')
   } finally {
     semesterToDelete.value = null
   }
@@ -133,9 +144,18 @@ async function confirmDeleteSemester() {
       </div>
     </div>
 
+    <div v-if="isLoading" class="flex min-h-48 items-center justify-center" role="status" aria-live="polite">
+      <span class="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></span>
+      <span class="sr-only">Loading semesters</span>
+    </div>
+    <div v-else-if="loadError" class="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-center dark:border-rose-900/50 dark:bg-rose-950/20" role="alert">
+      <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">{{ loadError }}</p>
+      <BaseButton variant="secondary" size="sm" class="mt-3" @click="loadHome">Try again</BaseButton>
+    </div>
+
     <!-- Semester Grid -->
     <div
-      v-if="filteredSemesters.length"
+      v-else-if="filteredSemesters.length"
       class="grid gap-4 sm:grid-cols-2"
     >
       <SemesterCard

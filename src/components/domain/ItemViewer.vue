@@ -4,12 +4,11 @@ import BaseButton from '../ui/BaseButton.vue'
 import BaseInput from '../ui/BaseInput.vue'
 import BaseTextarea from '../ui/BaseTextarea.vue'
 import SyncStatusBadge from './SyncStatusBadge.vue'
-import ConfirmDialog from '../ui/ConfirmDialog.vue'
 import { useObjectUrl } from '../../composables/useObjectUrl'
 import { useSyncStore } from '../../stores/sync'
 import { useToast } from '../../composables/useToast'
 import { formatDate, formatFileSize } from '../../utils/format'
-import { X, Trash2, Edit3, Download, ExternalLink, RefreshCw } from '../ui/icons.js'
+import { X, Trash2, Edit3, Download, ExternalLink } from '../ui/icons.js'
 
 const props = defineProps({
   item: {
@@ -27,7 +26,6 @@ const isEditing = ref(false)
 const editTitle = ref('')
 const editText = ref('')
 const editCaption = ref('')
-const showDeleteConfirm = ref(false)
 const isDownloading = ref(false)
 const downloadedBlob = ref(null)
 
@@ -83,21 +81,21 @@ async function handleFetchFromDrive() {
 }
 
 async function handleOpenFile() {
-  if (props.item?.blob || downloadedBlob.value) {
-    const blobToOpen = props.item?.blob || downloadedBlob.value
-    const url = URL.createObjectURL(blobToOpen)
-    window.open(url, '_blank')
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  const popup = window.open('about:blank', '_blank')
+  if (!popup) {
+    toast.error('Allow pop-ups to open this file.')
     return
   }
 
-  // Not cached locally, download on demand (Fixes B3)
-  const blob = await handleFetchFromDrive()
-  if (blob) {
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  const blob = props.item?.blob || downloadedBlob.value || await handleFetchFromDrive()
+  if (!blob) {
+    popup.close()
+    return
   }
+
+  const url = URL.createObjectURL(blob)
+  popup.location.replace(url)
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
 }
 </script>
 

@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useItemStore } from '../stores/items'
 import { useSemesterStore } from '../stores/semesters'
 import { useAuthStore } from '../stores/auth'
+import { registerBackgroundSync } from '../services/backgroundSync'
 import { useToast } from '../composables/useToast'
 import PageHeader from '../components/ui/PageHeader.vue'
 import SegmentedTabs from '../components/ui/SegmentedTabs.vue'
@@ -28,18 +29,34 @@ const activeTab = ref('text')
 const isAddSheetOpen = ref(false)
 const viewingItem = ref(null)
 const itemToDelete = ref(null)
+const loadError = ref('')
 
-onMounted(async () => {
-  await Promise.all([
-    itemStore.loadSubjectItems(route.params.semesterId, route.params.subjectId, route.params.exam),
-    semesterStore.load(),
-    authStore.refreshPendingCount(),
-  ])
-  if (!semester.value) {
-    toast.error('Semester not found')
-    router.replace('/')
+async function loadSubjectPage() {
+  loadError.value = ''
+  try {
+    await Promise.all([
+      itemStore.loadSubjectItems(route.params.semesterId, route.params.subjectId, route.params.exam),
+      semesterStore.load(),
+      authStore.refreshPendingCount(),
+    ])
+    if (!semester.value) {
+      toast.error('Semester not found.')
+      router.replace('/')
+    } else if (!subject.value) {
+      toast.error('Subject not found.')
+      router.replace(`/semester/${route.params.semesterId}/${route.params.exam}`)
+    }
+  } catch (error) {
+    loadError.value = error?.message || 'Could not load this subject.'
+    toast.error(loadError.value)
   }
-})
+}
+
+watch(
+  () => [route.params.semesterId, route.params.subjectId, route.params.exam],
+  loadSubjectPage,
+  { immediate: true },
+)
 
 const examType = computed(() => route.params.exam || '')
 
@@ -78,35 +95,39 @@ const tabs = computed(() => [
   { value: 'file', label: 'Files', count: filesList.value.length, icon: UploadCloud },
 ])
 
-const activeItems = computed(() => {
-  switch (activeTab.value) {
-    case 'photo':
-      return photosList.value
-    case 'file':
-      return filesList.value
-    case 'text':
-    default:
-      return notesList.value
-  }
-})
-
 async function handleSaveItem(payload) {
   try {
-    await itemStore.addItem({
-      ...payload,
+    const payloads = (Array.isArray(payload) ? payload : [payload]).map((item) => ({
+      ...item,
       semesterId: route.params.semesterId,
       subjectId: route.params.subjectId,
       exam: route.params.exam,
-    })
+    }))
+    await itemStore.addItems(payloads)
 
-    activeTab.value = payload.type
+    activeTab.value = payloads[0].type
     await authStore.refreshPendingCount()
     isAddSheetOpen.value = false
-    toast.success('Saved. Uploading when online')
+    toast.success(
+      payloads.length > 1
+        ? `Saved ${payloads.length} photos on this device.`
+        : 'Saved on this device.',
+    )
 
-    // Trigger sync in background if online and connected
     if (navigator.onLine && authStore.signedIn) {
-      authStore.syncNow().catch(() => undefined)
+      const result = await authStore.syncNow()
+      if (!result.ok || result.mirrorError) {
+        toast.error(result.reason || result.mirrorError || 'Could not sync the saved item.')
+      }
+    } else if (!navigator.onLine && authStore.signedIn) {
+      const scheduled = await registerBackgroundSync()
+      toast.info(
+        scheduled
+          ? 'Background upload is scheduled. It will run when your connection returns if this browser supports it.'
+          : 'Saved locally. Open ClassVault while online to upload on this browser.',
+      )
+    } else {
+      toast.info('Saved locally. Connect Google Drive to upload this item.')
     }
   } catch (err) {
     toast.error(err?.message || 'Failed to save item to Vault')
@@ -115,13 +136,25 @@ async function handleSaveItem(payload) {
 
 async function handleUpdateItem(id, changes) {
   try {
-    await itemStore.updateItem(id, changes)
-    if (viewingItem.value?.id === id) {
-      viewingItem.value = { ...viewingItem.value, ...changes }
+    const item = itemStore.items.find((candidate) => candidate.id === id)
+    const updates = { ...changes }
+    if (item?.type === 'text' && updates.title) {
+      updates.fileName = `${updates.title}.txt`
     }
-    toast.success('Item updated')
+    await itemStore.updateItem(id, updates)
+    if (viewingItem.value?.id === id) {
+      viewingItem.value = { ...viewingItem.value, ...updates }
+    }
+    await authStore.refreshPendingCount()
+    toast.success(item?.driveFileId ? 'Changes saved. Syncing to Google Drive.' : 'Item updated')
+    if (navigator.onLine && authStore.signedIn) {
+      const result = await authStore.syncNow()
+      if (!result.ok || result.mirrorError) {
+        toast.error(result.reason || result.mirrorError || 'Could not sync the updated item.')
+      }
+    }
   } catch (err) {
-    toast.error('Failed to update item')
+    toast.error(err?.message || 'Failed to update item.')
   }
 }
 
@@ -131,16 +164,17 @@ function promptDeleteItem(item) {
 
 async function confirmDeleteItem() {
   if (!itemToDelete.value) return
-  const id = itemToDelete.value.id
+  const item = itemToDelete.value
+  const id = item.id
   try {
     await itemStore.deleteItem(id)
     if (viewingItem.value?.id === id) {
       viewingItem.value = null
     }
     await authStore.refreshPendingCount()
-    toast.success('Item deleted (removed from device & Drive)')
+    toast.success(item.driveFileId ? 'Item deleted from this device and Google Drive.' : 'Item deleted from this device.')
   } catch (err) {
-    toast.error('Failed to delete item')
+    toast.error(err?.message || 'Failed to delete item.')
   } finally {
     itemToDelete.value = null
   }
@@ -150,9 +184,6 @@ function openViewer(item) {
   viewingItem.value = item
 }
 
-function handleDownloadFromDrive(item) {
-  toast.info('Downloading file from Google Drive...')
-}
 </script>
 
 <template>
@@ -183,13 +214,30 @@ function handleDownloadFromDrive(item) {
       </template>
     </PageHeader>
 
-    <!-- Segmented Filter Tabs -->
-    <div class="mb-5">
-      <SegmentedTabs v-model="activeTab" :tabs="tabs" />
+    <div v-if="loadError" class="mx-auto mt-8 max-w-lg rounded-2xl border border-rose-200 bg-rose-50 p-5 text-center dark:border-rose-900/50 dark:bg-rose-950/20" role="alert">
+      <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">{{ loadError }}</p>
+      <button
+        type="button"
+        class="mt-3 rounded-lg px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+        @click="loadSubjectPage"
+      >
+        Try again
+      </button>
     </div>
 
-    <!-- Notes Tab -->
-    <div v-if="activeTab === 'text'">
+    <div v-else-if="itemStore.loading" class="flex min-h-48 items-center justify-center" role="status" aria-live="polite">
+      <span class="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></span>
+      <span class="sr-only">Loading items</span>
+    </div>
+
+    <div v-else>
+      <!-- Segmented Filter Tabs -->
+      <div class="mb-5">
+        <SegmentedTabs v-model="activeTab" :tabs="tabs" />
+      </div>
+
+      <!-- Notes Tab -->
+      <div v-if="activeTab === 'text'">
       <div v-if="notesList.length" class="space-y-3">
         <NoteCard
           v-for="item in notesList"
@@ -208,10 +256,10 @@ function handleDownloadFromDrive(item) {
         action-label="Write a note"
         @action="isAddSheetOpen = true"
       />
-    </div>
+      </div>
 
-    <!-- Photos Tab -->
-    <div v-else-if="activeTab === 'photo'">
+      <!-- Photos Tab -->
+      <div v-else-if="activeTab === 'photo'">
       <div
         v-if="photosList.length"
         class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4"
@@ -232,10 +280,10 @@ function handleDownloadFromDrive(item) {
         action-label="Take or pick photo"
         @action="isAddSheetOpen = true"
       />
-    </div>
+      </div>
 
-    <!-- Files Tab -->
-    <div v-else-if="activeTab === 'file'">
+      <!-- Files Tab -->
+      <div v-else-if="activeTab === 'file'">
       <div v-if="filesList.length" class="space-y-2.5">
         <FileRow
           v-for="item in filesList"
@@ -253,11 +301,13 @@ function handleDownloadFromDrive(item) {
         action-label="Attach a file"
         @action="isAddSheetOpen = true"
       />
+      </div>
     </div>
 
-    <!-- Floating Action Button for adding items -->
+    <!-- Floating action button for adding items -->
     <FabButton
       aria-label="Add note, photo, or file"
+      v-if="!itemStore.loading && !loadError"
       @click="isAddSheetOpen = true"
     />
 
@@ -275,7 +325,6 @@ function handleDownloadFromDrive(item) {
       @close="viewingItem = null"
       @update="handleUpdateItem"
       @delete="promptDeleteItem"
-      @download="handleDownloadFromDrive"
     />
 
     <!-- Delete Confirmation Dialog -->

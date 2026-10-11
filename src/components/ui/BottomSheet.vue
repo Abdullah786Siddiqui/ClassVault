@@ -1,15 +1,38 @@
 <script setup>
-import { onMounted, onUnmounted, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   title: { type: String, default: '' },
+  stacked: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close'])
+const panel = ref(null)
+const closeButton = ref(null)
+let previouslyFocusedElement = null
 
 function handleKeyDown(event) {
-  if (event.key === 'Escape' && props.open) emit('close')
+  if (!props.open || document.querySelector('[role="alertdialog"]')) return
+  if (event.key === 'Escape') {
+    emit('close')
+    return
+  }
+  if (event.key !== 'Tab') return
+
+  const focusable = panel.value?.querySelectorAll(
+    'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  )
+  if (!focusable?.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 watch(
@@ -17,6 +40,18 @@ watch(
   (isOpen) => {
     if (typeof document !== 'undefined') {
       document.body.style.overflow = isOpen ? 'hidden' : ''
+    }
+    if (isOpen) {
+      previouslyFocusedElement = document.activeElement
+      nextTick(() => {
+        const initialFocus = panel.value?.querySelector('[autofocus]') || closeButton.value
+        initialFocus?.focus()
+      })
+    } else {
+      nextTick(() => {
+        previouslyFocusedElement?.focus?.()
+        previouslyFocusedElement = null
+      })
     }
   },
 )
@@ -35,6 +70,7 @@ onUnmounted(() => {
       <div
         v-if="open"
         class="sheet-backdrop"
+        :class="{ 'sheet-backdrop--stacked': stacked }"
         aria-hidden="true"
         @click="emit('close')"
       />
@@ -44,10 +80,12 @@ onUnmounted(() => {
     <Transition name="slide-up">
       <div
         v-if="open"
+        ref="panel"
         role="dialog"
         aria-modal="true"
         :aria-label="title || 'Modal sheet'"
         class="sheet-panel"
+        :class="{ 'sheet-panel--stacked': stacked }"
       >
         <!-- Drag handle (mobile only) -->
         <div class="sheet-handle-wrap">
@@ -61,6 +99,7 @@ onUnmounted(() => {
           </slot>
           <button
             type="button"
+            ref="closeButton"
             aria-label="Close sheet"
             class="sheet-close-btn"
             @click="emit('close')"
@@ -88,6 +127,10 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(4px);
 }
 
+.sheet-backdrop--stacked {
+  z-index: 60;
+}
+
 .sheet-panel {
   position: fixed;
   left: 0; right: 0; bottom: 0;
@@ -101,6 +144,10 @@ onUnmounted(() => {
   box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
+}
+
+.sheet-panel--stacked {
+  z-index: 61;
 }
 
 @media (min-width: 640px) {

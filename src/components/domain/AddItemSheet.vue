@@ -28,7 +28,7 @@ const title = ref('')
 const noteText = ref('')
 const caption = ref('')
 const selectedFile = ref(null)
-const previewUrl = ref('')
+const selectedPhotos = ref([])
 const cameraInputRef = ref(null)
 const galleryInputRef = ref(null)
 const fileInputRef = ref(null)
@@ -49,9 +49,10 @@ watch(
       activeType.value = props.initialType || 'text'
       resetForm()
     } else {
-      clearPreview()
-    }
-  },
+        clearPreviews()
+        selectedFile.value = null
+      }
+    },
 )
 
 watch(
@@ -66,34 +67,64 @@ function resetForm() {
   noteText.value = ''
   caption.value = ''
   selectedFile.value = null
-  clearPreview()
+  clearPreviews()
 }
 
-function clearPreview() {
-  if (previewUrl.value) {
-    URL.revokeObjectURL(previewUrl.value)
-    previewUrl.value = ''
+function clearPreviews() {
+  for (const photo of selectedPhotos.value) {
+    URL.revokeObjectURL(photo.previewUrl)
   }
+  selectedPhotos.value = []
 }
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024 // 25 MB
 
 function handleFileSelection(event) {
-  const file = event.target.files?.[0]
-  if (!file) return
+  const files = Array.from(event.target.files || [])
+  event.target.value = ''
+  if (!files.length) return
 
-  if (file.size > MAX_FILE_SIZE) {
-    toast.error('File size exceeds 25MB limit. Please select a smaller file.')
-    event.target.value = ''
+  if (activeType.value === 'photo') {
+    const validFiles = files.filter((file) => {
+      if (!file.type.startsWith('image/')) {
+        toast.error(`"${file.name}" is not an image.`)
+        return false
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        toast.error(`"${file.name}" exceeds the 25 MB limit.`)
+        return false
+      }
+      return true
+    })
+    const existingKeys = new Set(
+      selectedPhotos.value.map(({ file }) => `${file.name}:${file.size}:${file.lastModified}`),
+    )
+    selectedPhotos.value.push(
+      ...validFiles
+        .filter((file) => !existingKeys.has(`${file.name}:${file.size}:${file.lastModified}`))
+        .map((file) => ({ file, previewUrl: URL.createObjectURL(file) })),
+    )
+    if (selectedPhotos.value.length > 1) {
+      toast.info(`${selectedPhotos.value.length} photos selected`)
+    }
     return
   }
 
-  selectedFile.value = file
-  clearPreview()
-
-  if (file.type.startsWith('image/')) {
-    previewUrl.value = URL.createObjectURL(file)
+  const file = files[0]
+  if (file.size > MAX_FILE_SIZE) {
+    toast.error('File size exceeds the 25 MB limit. Please select a smaller file.')
+    return
   }
+  selectedFile.value = file
+}
+
+function removePhoto(index) {
+  URL.revokeObjectURL(selectedPhotos.value[index].previewUrl)
+  selectedPhotos.value.splice(index, 1)
+}
+
+function removeSelectedFile() {
+  selectedFile.value = null
 }
 
 function triggerCamera() {
@@ -112,7 +143,9 @@ const canSave = computed(() => {
   if (activeType.value === 'text') {
     return Boolean(noteText.value.trim())
   }
-  return Boolean(selectedFile.value)
+  return activeType.value === 'photo'
+    ? selectedPhotos.value.length > 0
+    : Boolean(selectedFile.value)
 })
 
 function handleSave() {
@@ -127,6 +160,22 @@ function handleSave() {
       fileName: `${noteTitle}.txt`,
       mimeType: 'text/plain',
     })
+    return
+  }
+
+  if (activeType.value === 'photo') {
+    emit(
+      'save',
+      selectedPhotos.value.map(({ file }) => ({
+        type: 'photo',
+        title: file.name,
+        caption: caption.value.trim(),
+        blob: file,
+        fileName: file.name,
+        mimeType: file.type || 'image/*',
+        fileSize: file.size,
+      })),
+    )
     return
   }
 
@@ -185,12 +234,13 @@ function handleSave() {
           ref="galleryInputRef"
           type="file"
           accept="image/*"
+          multiple
           class="hidden"
           @change="handleFileSelection"
         />
 
         <!-- Two big action buttons if no photo selected yet -->
-        <div v-if="!selectedFile" class="grid grid-cols-2 gap-2 pt-1">
+        <div v-if="!selectedPhotos.length" class="grid grid-cols-2 gap-2 pt-1">
           <button
             type="button"
             class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/50 p-3.5 text-center transition-all hover:border-indigo-500 hover:bg-indigo-50 active:scale-98 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:hover:border-indigo-500 sm:gap-2.5 sm:rounded-2xl sm:p-6"
@@ -217,30 +267,36 @@ function handleSave() {
         </div>
 
         <!-- Preview if photo is selected -->
-        <div v-else class="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900">
-          <img
-            v-if="previewUrl"
-            :src="previewUrl"
-            alt="Preview"
-            class="max-h-52 w-full object-cover"
-          />
-          <div class="flex items-center justify-between p-3">
-            <div class="min-w-0">
-              <p class="truncate text-xs font-bold text-slate-800 dark:text-slate-200">
-                {{ selectedFile.name }}
-              </p>
-              <p class="text-[11px] text-slate-400">
-                {{ formatFileSize(selectedFile.size) }}
-              </p>
-            </div>
-            <button
-              type="button"
-              class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-600 hover:bg-rose-100 hover:text-rose-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-950"
-              @click="selectedFile = null; clearPreview()"
+        <div v-else class="space-y-3">
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div
+              v-for="(photo, index) in selectedPhotos"
+              :key="`${photo.file.name}-${photo.file.lastModified}-${index}`"
+              class="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900"
             >
-              <X class="h-4 w-4" />
-            </button>
+              <img :src="photo.previewUrl" :alt="photo.file.name" class="h-28 w-full object-cover" />
+              <div class="flex items-center justify-between gap-2 p-2">
+                <div class="min-w-0">
+                  <p class="truncate text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                    {{ photo.file.name }}
+                  </p>
+                  <p class="text-[10px] text-slate-400">{{ formatFileSize(photo.file.size) }}</p>
+                </div>
+                <button
+                  type="button"
+                  :aria-label="`Remove ${photo.file.name}`"
+                  class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-600 hover:bg-rose-100 hover:text-rose-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-950"
+                  @click="removePhoto(index)"
+                >
+                  <X class="h-4 w-4" />
+                </button>
+              </div>
+            </div>
           </div>
+          <BaseButton variant="secondary" size="sm" block @click="triggerGallery">
+            <ImageIcon class="h-4 w-4" />
+            Add more photos
+          </BaseButton>
         </div>
 
         <BaseInput
@@ -290,7 +346,7 @@ function handleSave() {
           <button
             type="button"
             class="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:text-rose-600 dark:hover:text-rose-400"
-            @click="selectedFile = null"
+            @click="removeSelectedFile"
           >
             <X class="h-5 w-5" />
           </button>

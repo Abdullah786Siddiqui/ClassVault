@@ -30,7 +30,7 @@ onUnmounted(() => {
 const pendingCount = computed(() => syncStore.pendingCount)
 const failedCount = computed(() => syncStore.failedCount)
 
-// Main title: remaining offline status (Drive mein kitni cheezein nahi gayi hain)
+// Show whether local changes still need to be uploaded.
 const statusTitle = computed(() => {
   if (!authStore.signedIn) {
     return authStore.hasConnectedBefore ? 'Reconnect to Google Drive' : 'Google Drive Not Connected'
@@ -51,7 +51,7 @@ const statusTitle = computed(() => {
     return `${failedCount.value} ${failedCount.value === 1 ? 'item' : 'items'} failed to upload`
   }
   if (pendingCount.value > 0) {
-    return `${pendingCount.value} ${pendingCount.value === 1 ? 'item' : 'items'} offline (Drive mein nahi gaye)`
+    return `${pendingCount.value} ${pendingCount.value === 1 ? 'item' : 'items'} waiting to upload`
   }
   return 'All synced to Google Drive'
 })

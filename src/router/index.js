@@ -1,8 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import HomeView from '../views/HomeView.vue'
-import SemesterView from '../views/SemesterView.vue'
-import SubjectListView from '../views/SubjectListView.vue'
-import SubjectView from '../views/SubjectView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -10,22 +6,22 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: HomeView,
+      component: () => import('../views/HomeView.vue'),
     },
     {
       path: '/semester/:semesterId',
       name: 'semester',
-      component: SemesterView,
+      component: () => import('../views/SemesterView.vue'),
     },
     {
       path: '/semester/:semesterId/:exam',
       name: 'subject-list',
-      component: SubjectListView,
+      component: () => import('../views/SubjectListView.vue'),
     },
     {
       path: '/semester/:semesterId/:exam/subject/:subjectId',
       name: 'subject',
-      component: SubjectView,
+      component: () => import('../views/SubjectView.vue'),
     },
     {
       path: '/:pathMatch(.*)*',

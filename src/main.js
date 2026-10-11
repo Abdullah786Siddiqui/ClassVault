@@ -4,6 +4,8 @@ import App from './App.vue'
 import router from './router'
 import { useAuthStore } from './stores/auth'
 import { useSyncStore } from './stores/sync'
+import { useItemStore } from './stores/items'
+import { listenForBackgroundSync } from './services/backgroundSync'
 import './style.css'
 
 const app = createApp(App)
@@ -21,6 +23,16 @@ if ('storage' in navigator && 'persist' in navigator.storage) {
 // Initialize authentication and attempt silent token restore on launch (Fixes B13)
 const authStore = useAuthStore(pinia)
 authStore.initAuth().catch(() => undefined)
+
+listenForBackgroundSync(async () => {
+  const syncStore = useSyncStore(pinia)
+  await syncStore.refreshCounts()
+  const itemStore = useItemStore(pinia)
+  const { semesterId, subjectId, exam } = itemStore.currentContext
+  if (semesterId && subjectId && exam) {
+    await itemStore.loadSubjectItems(semesterId, subjectId, exam)
+  }
+})
 
 // Listen for network reconnect to trigger auto-sync (Fixes B4)
 window.addEventListener('online', async () => {

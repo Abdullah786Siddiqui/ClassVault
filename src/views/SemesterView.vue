@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSemesterStore } from '../stores/semesters'
 import { useToast } from '../composables/useToast'
@@ -24,6 +24,7 @@ const isSavingSubject = ref(false)
 const subjectToDelete = ref(null)
 const subjectToRename = ref(null)
 const renameName = ref('')
+const loadError = ref('')
 
 // Term state (Zero hardcoded terms)
 const isAddingTerm = ref(false)
@@ -31,13 +32,20 @@ const newTermName = ref('')
 const isCreatingTerm = ref(false)
 const termToDelete = ref(null)
 
-onMounted(async () => {
-  await semesterStore.load()
-  if (!semester.value) {
-    toast.error('Semester not found')
-    router.replace('/')
+async function loadSemester() {
+  loadError.value = ''
+  try {
+    await semesterStore.load()
+    if (!semester.value) {
+      toast.error('Semester not found.')
+      router.replace('/')
+    }
+  } catch (error) {
+    loadError.value = error?.message || 'Could not load this semester.'
   }
-})
+}
+
+watch(() => route.params.semesterId, loadSemester, { immediate: true })
 
 const semester = computed(() =>
   semesterStore.semesters.find((item) => item.id === Number(route.params.semesterId)),
@@ -82,9 +90,9 @@ async function confirmDeleteTerm() {
   const { id, name } = termToDelete.value
   try {
     await semesterStore.deleteExamFromSemester(route.params.semesterId, id)
-    toast.info(`Deleted "${name}" (files deleted from Drive)`)
+    toast.success(`Deleted "${name}".`)
   } catch (err) {
-    toast.error('Failed to delete term')
+    toast.error(err?.message || 'Failed to delete term.')
   } finally {
     termToDelete.value = null
   }
@@ -102,7 +110,7 @@ async function handleAddSubject() {
       toast.success(`Added subject "${name}"`)
     }
   } catch (err) {
-    toast.error(err.message || 'Failed to add subject')
+    toast.error(err?.message || 'Failed to add subject.')
   } finally {
     isSavingSubject.value = false
   }
@@ -137,9 +145,9 @@ async function confirmDeleteSubject() {
   const name = subjectToDelete.value.name
   try {
     await semesterStore.deleteSubject(subjectToDelete.value.id)
-    toast.info(`Deleted "${name}" (files deleted from Drive)`)
+    toast.success(`Deleted "${name}".`)
   } catch (err) {
-    toast.error('Failed to delete subject')
+    toast.error(err?.message || 'Failed to delete subject.')
   } finally {
     subjectToDelete.value = null
   }
@@ -168,6 +176,16 @@ async function confirmDeleteSubject() {
       </template>
     </PageHeader>
 
+    <div v-if="semesterStore.loading" class="flex min-h-48 items-center justify-center" role="status" aria-live="polite">
+      <span class="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></span>
+      <span class="sr-only">Loading semester</span>
+    </div>
+    <div v-else-if="loadError" class="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-center dark:border-rose-900/50 dark:bg-rose-950/20" role="alert">
+      <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">{{ loadError }}</p>
+      <BaseButton variant="secondary" size="sm" class="mt-3" @click="loadSemester">Try again</BaseButton>
+    </div>
+
+    <div v-else>
     <!-- Terms Section -->
     <section class="mb-6 sm:mb-8">
       <div class="mb-3">
@@ -309,6 +327,7 @@ async function confirmDeleteSubject() {
         </div>
       </div>
     </BottomSheet>
+    </div>
 
     <!-- Add Term BottomSheet -->
     <BottomSheet
@@ -363,6 +382,7 @@ async function confirmDeleteSubject() {
     <!-- Rename Subject BottomSheet -->
     <BottomSheet
       :open="Boolean(subjectToRename)"
+      stacked
       title="Rename Subject"
       @close="subjectToRename = null"
     >

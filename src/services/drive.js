@@ -3,6 +3,7 @@ import db from './db'
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const ROOT_FOLDER_NAME = 'ClassVault'
 const SESSION_TOKEN_KEY = 'classvault.driveAccessToken'
+const DRIVE_TOKEN_SETTING = 'classvault.driveAccessToken'
 const inFlightFolderPaths = new Map()
 
 const tokenState = {
@@ -16,6 +17,48 @@ function getClientId() {
 
 export async function resetDriveFolderCache() {
   await db.driveFolders.clear()
+}
+
+export async function renameDriveFolderPath(oldRawPath, newRawPath) {
+  const oldPath = getRootedFolderPath(oldRawPath)
+  const newPath = getRootedFolderPath(newRawPath)
+  if (oldPath === newPath) return false
+
+  const cachedFolder = await db.driveFolders.get(oldPath)
+  if (!cachedFolder?.driveFolderId) return false
+
+  const auth = await getDriveAccessToken()
+  if (!auth.ok) {
+    throw new Error(auth.message || 'Reconnect Google Drive before renaming this folder.')
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Connect to the internet before renaming this Drive folder.')
+  }
+
+  const newFolderName = newPath.split('/').pop()
+  await requestDriveUrl(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cachedFolder.driveFolderId)}?fields=id,name`,
+    auth.accessToken,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newFolderName }),
+    },
+  )
+
+  const cachedPaths = await db.driveFolders
+    .filter((entry) => entry.path === oldPath || entry.path.startsWith(`${oldPath}/`))
+    .toArray()
+  await db.transaction('rw', db.driveFolders, async () => {
+    for (const entry of cachedPaths) {
+      await db.driveFolders.delete(entry.path)
+      await db.driveFolders.put({
+        ...entry,
+        path: `${newPath}${entry.path.slice(oldPath.length)}`,
+      })
+    }
+  })
+  return true
 }
 
 export function googleClientIdConfigured() {
@@ -49,17 +92,22 @@ function restoreSessionAccessToken() {
   }
 }
 
-function persistSessionAccessToken() {
+async function persistSessionAccessToken() {
+  const storedToken = JSON.stringify({
+    accessToken: tokenState.accessToken,
+    expiresAt: tokenState.expiresAt,
+  })
   try {
-    window.sessionStorage.setItem(
-      SESSION_TOKEN_KEY,
-      JSON.stringify({
-        accessToken: tokenState.accessToken,
-        expiresAt: tokenState.expiresAt,
-      }),
-    )
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(SESSION_TOKEN_KEY, storedToken)
+    }
   } catch (error) {
     console.warn('[ClassVault Drive] Could not persist the session token:', error)
+  }
+  try {
+    await db.settings.put({ key: DRIVE_TOKEN_SETTING, value: storedToken })
+  } catch (error) {
+    console.warn('[ClassVault Drive] Could not make the token available to background sync:', error)
   }
 }
 
@@ -137,7 +185,7 @@ export async function requestDriveAccessToken({ forcePrompt = false } = {}) {
     const tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: GOOGLE_DRIVE_SCOPE,
-      callback: (response) => {
+      callback: async (response) => {
         if (response.error) {
           resolve({ ok: false, message: response.error_description || response.error || 'Google sign-in failed.' })
           return
@@ -145,7 +193,7 @@ export async function requestDriveAccessToken({ forcePrompt = false } = {}) {
 
         tokenState.accessToken = response.access_token
         tokenState.expiresAt = Date.now() + Math.max((response.expires_in || 3600) - 30, 60) * 1000
-        persistSessionAccessToken()
+        await persistSessionAccessToken()
 
         resolve({ ok: true, accessToken: response.access_token, expiresAt: tokenState.expiresAt })
       },
@@ -169,17 +217,40 @@ export function getStoredAccessToken() {
 }
 
 export async function getDriveAccessToken({ forceRefresh = false } = {}) {
-  if (!forceRefresh) {
-    const accessToken = getStoredAccessToken()
-    if (accessToken) return { ok: true, accessToken }
+  if (forceRefresh) {
+    const result = await requestDriveAccessToken({ forcePrompt: true })
+    return result.ok
+      ? { ok: true, accessToken: result.accessToken }
+      : { ok: false, message: result.message }
   }
 
-  const result = await requestDriveAccessToken({ forcePrompt: forceRefresh })
-  if (!result.ok) {
-    return { ok: false, message: result.message }
+  const accessToken = getStoredAccessToken()
+  if (accessToken) return { ok: true, accessToken }
+
+  const stored = await db.settings.get(DRIVE_TOKEN_SETTING)
+  if (stored?.value) {
+    try {
+      const token = JSON.parse(stored.value)
+      if (
+        typeof token.accessToken === 'string' &&
+        token.accessToken &&
+        typeof token.expiresAt === 'number' &&
+        Date.now() < token.expiresAt
+      ) {
+        tokenState.accessToken = token.accessToken
+        tokenState.expiresAt = token.expiresAt
+        return { ok: true, accessToken: tokenState.accessToken }
+      }
+    } catch (error) {
+      console.warn('[ClassVault Drive] Could not read the background sync token:', error)
+    }
+    await db.settings.delete(DRIVE_TOKEN_SETTING)
   }
 
-  return { ok: true, accessToken: result.accessToken }
+  return {
+    ok: false,
+    message: 'Reconnect Google Drive to continue. No sign-in window was opened.',
+  }
 }
 
 function escapeDriveQuery(value) {
@@ -330,9 +401,49 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
   const safeName = item.fileName || item.title || 'note.txt'
   const contentType = item.mimeType || 'application/octet-stream'
   const payloadBlob = item.blob || new Blob([item.text || ''], { type: contentType })
+  const metadata = {
+    name: safeName,
+    mimeType: contentType,
+    description: item.caption || item.text || '',
+    appProperties: {
+      itemId: String(item.id),
+      createdAt: item.createdAt,
+      starred: item.starred ? '1' : '0',
+      syncStatus: 'synced',
+      type: item.type || 'file',
+      exam: item.exam || '',
+    },
+  }
 
-  // Duplicate file prevention: Check if a file with the same name already exists in this folder on Drive
-  const existingQuery = `name = '${escapeDriveQuery(safeName)}' and '${folderId}' in parents and trashed = false`
+  if (item.driveFileId) {
+    const mediaResponse = await requestDriveUrl(
+      `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(item.driveFileId)}?uploadType=media&fields=id,name,modifiedTime`,
+      accessToken,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': contentType },
+        body: payloadBlob,
+      },
+    )
+    const mediaResult = await mediaResponse.json()
+    const metadataResponse = await requestDriveUrl(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.driveFileId)}?fields=id,name,modifiedTime`,
+      accessToken,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(metadata),
+      },
+    )
+    return {
+      ...(await metadataResponse.json()),
+      modifiedTime: mediaResult.modifiedTime,
+      updated: true,
+    }
+  }
+
+  // Match only this item's Drive metadata so unrelated files are never overwritten.
+  const existingQuery = `appProperties has { key='itemId' and value='${escapeDriveQuery(item.id)}' } and '${folderId}' in parents and trashed = false`
   try {
     const checkRes = await requestDriveUrl(
       `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(existingQuery)}&spaces=drive&fields=files(id,name)&pageSize=1`,
@@ -359,23 +470,10 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
       }
     }
   } catch (err) {
-    console.warn(`[ClassVault Drive] Check for duplicate file error:`, err)
+    throw new Error(`Could not check for an existing Drive upload: ${err.message || err}`)
   }
 
-  const metadata = {
-    name: safeName,
-    mimeType: contentType,
-    parents: [folderId],
-    description: item.caption || item.text || '',
-    appProperties: {
-      itemId: String(item.id),
-      createdAt: item.createdAt,
-      starred: item.starred ? '1' : '0',
-      syncStatus: 'synced',
-      type: item.type || 'file',
-      exam: item.exam || '',
-    },
-  }
+  metadata.parents = [folderId]
 
   const formData = new FormData()
   formData.append(
@@ -430,10 +528,15 @@ export async function downloadDriveFile(driveFileId, accessToken) {
 
 /**
  * Delete a file or folder from Google Drive by ID.
- * Directly fulfills requirement: "yaha se delete ho to waha se bhi delete ho".
+ * Deletes a Drive file and reports failures to the caller.
  */
 export async function deleteDriveFile(driveFileId, accessToken) {
-  if (!driveFileId || !accessToken) return
+  if (!driveFileId || !accessToken) {
+    throw new Error('A Drive file ID and access token are required to delete this item.')
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Connect to the internet before deleting this Drive item.')
+  }
   try {
     const response = await fetch(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}`,
@@ -448,10 +551,10 @@ export async function deleteDriveFile(driveFileId, accessToken) {
       console.log(`[ClassVault Drive] Successfully deleted ${driveFileId} from Google Drive`)
     } else {
       const text = await response.text()
-      console.warn(`[ClassVault Drive] Delete file failed (${response.status}): ${text}`)
+      throw new Error(`Drive delete failed (${response.status}): ${text || response.statusText}`)
     }
   } catch (error) {
-    console.warn(`[ClassVault Drive] Error deleting file from Drive:`, error)
+    throw error
   }
 }
 
@@ -470,7 +573,7 @@ export async function deleteDriveFolderByPath(rawFolderPath, accessToken) {
 
 /**
  * Fetch Google Drive account info and storage quota.
- * Directly fulfills requirement: "isko pora google drive ka data show ho yaha pr".
+ * Fetches Google Drive account details and storage quota.
  */
 export async function getDriveAbout(accessToken) {
   if (!accessToken) return null
@@ -496,25 +599,42 @@ export async function listDriveFiles(accessToken) {
   }
 
   const files = []
-  let pageToken = ''
+  const rootQuery = `name = '${ROOT_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and 'root' in parents and trashed = false`
+  const rootResponse = await requestDriveUrl(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(rootQuery)}&spaces=drive&fields=files(id,name,mimeType,parents)&pageSize=100`,
+    accessToken,
+  )
+  const rootFolders = (await rootResponse.json()).files || []
+  const queue = rootFolders.map((folder) => folder.id)
+  files.push(...rootFolders)
 
-  do {
-    const params = new URLSearchParams({
-      q: 'trashed=false',
-      fields: 'nextPageToken,files(id,name,mimeType,size,modifiedTime,webViewLink,parents,description,appProperties)',
-      orderBy: 'folder,name',
-      pageSize: '1000',
-    })
-    if (pageToken) params.set('pageToken', pageToken)
+  while (queue.length) {
+    const parentId = queue.shift()
+    let pageToken = ''
+    do {
+      const params = new URLSearchParams({
+        q: `'${parentId}' in parents and trashed = false`,
+        fields: 'nextPageToken,files(id,name,mimeType,size,modifiedTime,createdTime,webViewLink,parents,description,appProperties)',
+        orderBy: 'folder,name',
+        pageSize: '1000',
+      })
+      if (pageToken) params.set('pageToken', pageToken)
 
-    const response = await requestDriveUrl(
-      `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
-      accessToken,
-    )
-    const data = await response.json()
-    files.push(...(data.files || []))
-    pageToken = data.nextPageToken || ''
-  } while (pageToken)
+      const response = await requestDriveUrl(
+        `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
+        accessToken,
+      )
+      const data = await response.json()
+      const children = data.files || []
+      files.push(...children)
+      queue.push(
+        ...children
+          .filter((file) => file.mimeType === 'application/vnd.google-apps.folder')
+          .map((folder) => folder.id),
+      )
+      pageToken = data.nextPageToken || ''
+    } while (pageToken)
+  }
 
   return files
 }

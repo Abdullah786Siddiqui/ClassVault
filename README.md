@@ -4,6 +4,8 @@ ClassVault is an offline-first study-space PWA for organizing semester notes, ph
 
 When connected, the app reconciles its ClassVault Drive folder on startup, manual sync, and when returning to the app. New or updated Drive files are reflected locally, and locally mirrored files removed from Drive are removed from the app; unsynced local items are kept.
 
+Offline uploads are queued locally. On browsers that support Background Sync (typically an installed Chromium-based PWA), ClassVault can upload queued items after connectivity returns without the app being open, as long as the saved Google Drive access token has not expired. Other browsers upload when ClassVault is open and online. If the token expires while the device is offline, reconnect Google Drive before syncing.
+
 ## Configure Google Drive
 
 Copy `.env.example` to `.env` and set `VITE_GOOGLE_CLIENT_ID` to your Google OAuth web client ID for local development. Keep `.env` local; environment files are excluded from Git.

@@ -38,11 +38,11 @@ const formattedDate = computed(() => formatDate(props.item.createdAt))
 <template>
   <BaseCard
     as="div"
-    class="group flex flex-col gap-2 p-3.5 sm:flex-row sm:items-center sm:justify-between"
+    class="file-row group flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between"
   >
     <div class="flex items-center gap-3 min-w-0">
-      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
-        <component :is="fileIcon" class="h-5 w-5" />
+      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
+        <component :is="fileIcon" class="h-4.5 w-4.5" />
       </div>
 
       <div class="min-w-0 flex-1">
@@ -61,7 +61,7 @@ const formattedDate = computed(() => formatDate(props.item.createdAt))
       </div>
     </div>
 
-    <div class="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 border-t border-slate-100 sm:border-0 sm:pt-0 dark:border-slate-800/80">
+    <div class="flex items-center justify-between sm:justify-end gap-2 shrink-0 pt-1.5 border-t border-slate-100 sm:border-0 sm:pt-0 dark:border-slate-800/80">
       <SyncStatusBadge :status="item.syncStatus" />
 
       <BaseButton

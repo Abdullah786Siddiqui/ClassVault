@@ -81,7 +81,7 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
           >
             <span class="status-dot"></span>
             <span class="status-pill-text">
-              {{ authStore.signedIn ? 'Drive Connected' : 'Offline Ready' }}
+              {{ authStore.signedIn ? 'Drive Connected' : authStore.hasConnectedBefore ? 'Reconnect Drive' : 'Offline Ready' }}
             </span>
           </div>
         </div>
@@ -138,6 +138,7 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow-x: clip;
   background: var(--color-surface-raised);
   color: var(--color-text);
   transition: background 0.2s ease, color 0.2s ease;
@@ -363,6 +364,7 @@ html.dark .icon-btn:hover {
   flex: 1;
   max-width: 82rem;
   width: 100%;
+  min-width: 0;
   margin: 0 auto;
   padding: 2rem clamp(1rem, 3.5vw, 2.5rem) 5rem;
 }
@@ -380,13 +382,13 @@ html.dark .icon-btn:hover {
   }
 
   .app-navbar-inner {
-    min-height: 4.15rem;
-    padding: 0.5rem 1rem;
+    min-height: 3.75rem;
+    padding: 0.4rem 0.875rem;
   }
 
   .app-logo-icon {
-    width: 2.3rem;
-    height: 2.3rem;
+    width: 2.15rem;
+    height: 2.15rem;
     border-radius: 0.75rem;
     font-size: 0.9rem;
   }
@@ -396,7 +398,7 @@ html.dark .icon-btn:hover {
   }
 
   .app-main {
-    padding: 1.25rem 1rem calc(4.75rem + env(safe-area-inset-bottom, 0px));
+    padding: 0.875rem 0.875rem calc(4rem + env(safe-area-inset-bottom, 0px));
   }
 
   .mobile-nav {
@@ -407,7 +409,7 @@ html.dark .icon-btn:hover {
     z-index: 40;
     display: flex;
     justify-content: space-around;
-    padding: 0.5rem 0.75rem max(0.6rem, env(safe-area-inset-bottom, 0.6rem));
+    padding: 0.3rem 0.75rem max(0.45rem, env(safe-area-inset-bottom, 0.45rem));
     background: color-mix(in srgb, var(--color-surface-card) 92%, transparent);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -419,7 +421,7 @@ html.dark .icon-btn:hover {
     flex-direction: column;
     align-items: center;
     gap: 0.2rem;
-    padding: 0.35rem 0.75rem;
+    padding: 0.25rem 0.75rem;
     border-radius: 0.65rem;
     color: var(--color-text-muted);
     font-size: 0.68rem;
@@ -428,13 +430,17 @@ html.dark .icon-btn:hover {
     border: none;
     background: transparent;
     cursor: pointer;
-    min-height: 2.75rem;
+    min-height: 2.5rem;
     min-width: 3.5rem;
     justify-content: center;
   }
 
+  .mobile-nav-link:focus-visible {
+    outline-offset: -2px;
+  }
+
   .mobile-nav-link > i {
-    font-size: 1.1rem;
+    font-size: 1rem;
   }
 
   .mobile-nav-link.is-active {

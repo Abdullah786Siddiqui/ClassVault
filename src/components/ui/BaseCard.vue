@@ -37,7 +37,7 @@ const paddingClasses = computed(() => {
 <template>
   <component
     :is="as"
-    class="rounded-3xl border border-slate-200/90 bg-white text-slate-900 shadow-xs transition-all duration-200 dark:border-slate-800/90 dark:bg-slate-900 dark:text-slate-100"
+    class="rounded-2xl border border-slate-200/90 bg-white text-slate-900 shadow-xs transition-all duration-200 dark:border-slate-800/90 dark:bg-slate-900 dark:text-slate-100 sm:rounded-3xl"
     :class="[
       paddingClasses,
       hoverable

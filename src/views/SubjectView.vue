@@ -155,7 +155,7 @@ function handleDownloadFromDrive(item) {
 </script>
 
 <template>
-  <div class="mx-auto max-w-6xl pb-24 sm:pb-28">
+  <div class="mx-auto max-w-6xl pb-6 sm:pb-10">
     <!-- Header with Breadcrumb -->
     <PageHeader
       :title="subject?.name || 'Subject Notes'"

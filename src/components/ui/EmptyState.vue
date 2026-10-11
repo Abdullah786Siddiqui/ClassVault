@@ -24,12 +24,12 @@ const emit = defineEmits(['action'])
 </script>
 
 <template>
-  <div class="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white/50 px-6 py-12 text-center backdrop-blur-xs dark:border-slate-800 dark:bg-slate-900/40">
+  <div class="empty-state flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white/50 px-5 py-8 text-center backdrop-blur-xs dark:border-slate-800 dark:bg-slate-900/40 sm:px-6 sm:py-12">
     <div
       v-if="icon"
-      class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400"
+      class="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 sm:mb-4 sm:h-14 sm:w-14 sm:rounded-2xl"
     >
-      <component :is="icon" class="h-7 w-7" aria-hidden="true" />
+      <component :is="icon" class="h-5 w-5 sm:h-7 sm:w-7" aria-hidden="true" />
     </div>
 
     <h3 class="text-base font-bold text-slate-800 dark:text-slate-100">

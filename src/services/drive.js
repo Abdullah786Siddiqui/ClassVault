@@ -2,6 +2,7 @@ import db from './db'
 
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const ROOT_FOLDER_NAME = 'ClassVault'
+const SESSION_TOKEN_KEY = 'classvault.driveAccessToken'
 const inFlightFolderPaths = new Map()
 
 const tokenState = {
@@ -22,6 +23,47 @@ export async function resetDriveFolderCache() {
 
 export function googleClientIdConfigured() {
   return Boolean(getClientId())
+}
+
+function restoreSessionAccessToken() {
+  if (typeof window === 'undefined') return ''
+
+  try {
+    const stored = window.sessionStorage.getItem(SESSION_TOKEN_KEY)
+    if (!stored) return ''
+
+    const token = JSON.parse(stored)
+    if (
+      typeof token.accessToken !== 'string' ||
+      !token.accessToken ||
+      typeof token.expiresAt !== 'number' ||
+      Date.now() >= token.expiresAt
+    ) {
+      window.sessionStorage.removeItem(SESSION_TOKEN_KEY)
+      return ''
+    }
+
+    tokenState.accessToken = token.accessToken
+    tokenState.expiresAt = token.expiresAt
+    return tokenState.accessToken
+  } catch (error) {
+    console.warn('[ClassVault Drive] Could not restore the session token:', error)
+    return ''
+  }
+}
+
+function persistSessionAccessToken() {
+  try {
+    window.sessionStorage.setItem(
+      SESSION_TOKEN_KEY,
+      JSON.stringify({
+        accessToken: tokenState.accessToken,
+        expiresAt: tokenState.expiresAt,
+      }),
+    )
+  } catch (error) {
+    console.warn('[ClassVault Drive] Could not persist the session token:', error)
+  }
 }
 
 function loadGoogleScript() {
@@ -56,6 +98,10 @@ function loadGoogleScript() {
 }
 
 export async function ensureGoogleAvailable() {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { ok: false, message: 'Google Drive is unavailable while you are offline.' }
+  }
+
   if (!getClientId()) {
     return { ok: false, message: 'Google Drive is not configured yet. Add VITE_GOOGLE_CLIENT_ID to .env.' }
   }
@@ -72,9 +118,17 @@ export async function ensureGoogleAvailable() {
 }
 
 export async function requestDriveAccessToken({ forcePrompt = false } = {}) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { ok: false, message: 'Google Drive is unavailable while you are offline.' }
+  }
+
   const ready = await ensureGoogleAvailable()
   if (!ready.ok) {
     return ready
+  }
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { ok: false, message: 'Google Drive is unavailable while you are offline.' }
   }
 
   const clientId = getClientId()
@@ -91,6 +145,7 @@ export async function requestDriveAccessToken({ forcePrompt = false } = {}) {
 
         tokenState.accessToken = response.access_token
         tokenState.expiresAt = Date.now() + Math.max((response.expires_in || 3600) - 30, 60) * 1000
+        persistSessionAccessToken()
 
         resolve({ ok: true, accessToken: response.access_token, expiresAt: tokenState.expiresAt })
       },
@@ -104,15 +159,19 @@ export async function requestDriveAccessToken({ forcePrompt = false } = {}) {
 }
 
 export function getStoredAccessToken() {
-  if (!tokenState.accessToken || Date.now() >= tokenState.expiresAt) {
-    return ''
+  if (tokenState.accessToken && Date.now() < tokenState.expiresAt) {
+    return tokenState.accessToken
   }
-  return tokenState.accessToken
+
+  tokenState.accessToken = ''
+  tokenState.expiresAt = 0
+  return restoreSessionAccessToken()
 }
 
 export async function getDriveAccessToken({ forceRefresh = false } = {}) {
-  if (!forceRefresh && tokenState.accessToken && Date.now() < tokenState.expiresAt) {
-    return { ok: true, accessToken: tokenState.accessToken }
+  if (!forceRefresh) {
+    const accessToken = getStoredAccessToken()
+    if (accessToken) return { ok: true, accessToken }
   }
 
   const result = await requestDriveAccessToken({ forcePrompt: forceRefresh })

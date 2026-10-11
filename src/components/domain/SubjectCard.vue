@@ -25,11 +25,11 @@ const emit = defineEmits(['open', 'rename', 'delete'])
   <BaseCard
     hoverable
     as="div"
-    class="group flex items-center justify-between p-4"
+    class="subject-card group flex items-center justify-between p-3 sm:p-4"
     @click="emit('open', subject.id)"
   >
-    <div class="flex items-center gap-3.5 min-w-0">
-      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 transition-colors group-hover:bg-indigo-600 group-hover:text-white dark:bg-indigo-950/60 dark:text-indigo-400 dark:group-hover:bg-indigo-600 dark:group-hover:text-white">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 transition-colors group-hover:bg-indigo-600 group-hover:text-white dark:bg-indigo-950/60 dark:text-indigo-400 dark:group-hover:bg-indigo-600 dark:group-hover:text-white">
         <Folder class="h-5 w-5" />
       </div>
       <div class="min-w-0">

@@ -143,7 +143,7 @@ async function confirmDeleteSubject() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-6xl pb-24 sm:pb-28">
+  <div class="mx-auto max-w-6xl pb-6 sm:pb-10">
     <PageHeader
       :title="semester?.name || 'Semester Details'"
       subtitle="Academic Workspace"
@@ -164,29 +164,6 @@ async function confirmDeleteSubject() {
       </template>
     </PageHeader>
 
-    <!-- Unified Semester Action Bar (Add Term & Subject from one place inside semester) -->
-    <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-800/80 dark:bg-slate-900/80">
-      <div>
-        <h2 class="text-sm font-bold text-slate-900 dark:text-white">
-          {{ semester?.name }}
-        </h2>
-        <p class="text-xs text-slate-500 dark:text-slate-400">
-          {{ currentExams.length }} {{ currentExams.length === 1 ? 'term' : 'terms' }} · {{ subjectList.length }} {{ subjectList.length === 1 ? 'subject' : 'subjects' }}
-        </p>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <BaseButton variant="primary" size="sm" @click="isAddingTerm = true">
-          <Plus class="h-4 w-4" />
-          <span>Add Term</span>
-        </BaseButton>
-        <BaseButton variant="secondary" size="sm" @click="isAddingSubject = true">
-          <Plus class="h-4 w-4" />
-          <span>Add Subject</span>
-        </BaseButton>
-      </div>
-    </div>
-
     <!-- Terms Section -->
     <section class="mb-8">
       <div class="mb-3 flex items-center justify-between gap-3">
@@ -199,14 +176,6 @@ async function confirmDeleteSubject() {
           </p>
         </div>
 
-        <BaseButton
-          variant="subtle"
-          size="xs"
-          @click="isAddingTerm = true"
-        >
-          <Plus class="h-3.5 w-3.5" />
-          <span>Add Term</span>
-        </BaseButton>
       </div>
 
       <div v-if="currentExams.length" class="grid gap-4 sm:grid-cols-2">
@@ -257,14 +226,6 @@ async function confirmDeleteSubject() {
           </p>
         </div>
 
-        <BaseButton
-          variant="subtle"
-          size="sm"
-          @click="isAddingSubject = true"
-        >
-          <Plus class="h-4 w-4" />
-          <span>Add Subject</span>
-        </BaseButton>
       </div>
 
       <!-- Quick Add Input Form -->

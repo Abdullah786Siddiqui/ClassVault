@@ -66,6 +66,7 @@ const sizeClass = computed(() => `btn-${props.size}`)
   text-decoration: none;
   position: relative;
   overflow: hidden;
+  line-height: 1.2;
 }
 .btn:focus-visible {
   outline: 2px solid #8b5cf6;
@@ -78,8 +79,8 @@ const sizeClass = computed(() => `btn-${props.size}`)
 }
 
 /* Sizes */
-.btn-xs { min-height: 1.875rem; padding: 0.25rem 0.625rem; font-size: 0.75rem; border-radius: 0.5rem; }
-.btn-sm { min-height: 2.125rem; padding: 0.375rem 0.875rem; font-size: 0.8125rem; }
+.btn-xs { min-height: 2rem; padding: 0.25rem 0.625rem; font-size: 0.75rem; border-radius: 0.5rem; }
+.btn-sm { min-height: 2.375rem; padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
 .btn-md { min-height: 2.625rem; padding: 0.5rem 1.125rem; font-size: 0.875rem; }
 .btn-lg { min-height: 3rem; padding: 0.75rem 1.5rem; font-size: 1rem; border-radius: 1rem; }
 

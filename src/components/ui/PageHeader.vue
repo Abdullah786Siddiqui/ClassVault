@@ -36,7 +36,7 @@ function handleBack() {
 </script>
 
 <template>
-  <header class="mb-5 flex items-center justify-between gap-3">
+  <header class="page-header mb-5 flex items-center justify-between gap-3">
     <div class="flex items-center gap-3 min-w-0">
       <IconButton
         v-if="showBack"
@@ -62,8 +62,35 @@ function handleBack() {
       </div>
     </div>
 
-    <div class="flex items-center gap-2 shrink-0">
-      <slot />
+    <div v-if="$slots.actions || $slots.default" class="page-header-actions flex items-center gap-2 shrink-0">
+      <slot name="actions">
+        <slot />
+      </slot>
     </div>
   </header>
 </template>
+
+<style scoped>
+@media (max-width: 639px) {
+  .page-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .page-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .page-header-actions :deep(> div) {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .page-header-actions :deep(.btn) {
+    flex: 1 1 8rem;
+  }
+}
+</style>

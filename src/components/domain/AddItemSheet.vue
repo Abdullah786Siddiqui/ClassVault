@@ -191,14 +191,14 @@ function handleSave() {
         />
 
         <!-- Two big action buttons if no photo selected yet -->
-        <div v-if="!selectedFile" class="grid grid-cols-2 gap-3 pt-1">
+        <div v-if="!selectedFile" class="grid grid-cols-2 gap-2 pt-1">
           <button
             type="button"
-            class="flex flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed border-indigo-200 bg-indigo-50/50 p-6 text-center transition-all hover:border-indigo-500 hover:bg-indigo-50 active:scale-98 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:hover:border-indigo-500"
+            class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/50 p-3.5 text-center transition-all hover:border-indigo-500 hover:bg-indigo-50 active:scale-98 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:hover:border-indigo-500 sm:gap-2.5 sm:rounded-2xl sm:p-6"
             @click="triggerCamera"
           >
-            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-600/30">
-              <Camera class="h-6 w-6" />
+            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md shadow-indigo-600/30 sm:h-12 sm:w-12 sm:rounded-2xl">
+              <Camera class="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
             <span class="text-sm font-bold text-slate-900 dark:text-white">Take photo</span>
             <span class="text-xs text-slate-500 dark:text-slate-400">Back camera</span>
@@ -206,11 +206,11 @@ function handleSave() {
 
           <button
             type="button"
-            class="flex flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center transition-all hover:border-indigo-500 hover:bg-slate-100 active:scale-98 dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-indigo-500"
+            class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-3.5 text-center transition-all hover:border-indigo-500 hover:bg-slate-100 active:scale-98 dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-indigo-500 sm:gap-2.5 sm:rounded-2xl sm:p-6"
             @click="triggerGallery"
           >
-            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-700 text-white shadow-md dark:bg-slate-800">
-              <ImageIcon class="h-6 w-6" />
+            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-700 text-white shadow-md dark:bg-slate-800 sm:h-12 sm:w-12 sm:rounded-2xl">
+              <ImageIcon class="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
             <span class="text-sm font-bold text-slate-900 dark:text-white">Choose gallery</span>
             <span class="text-xs text-slate-500 dark:text-slate-400">Photos & files</span>

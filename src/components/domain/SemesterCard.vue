@@ -30,7 +30,7 @@ const formattedDate = computed(() => {
   <BaseCard
     hoverable
     as="div"
-    class="group relative flex flex-col justify-between overflow-hidden p-5"
+    class="semester-card group relative flex flex-col justify-between overflow-hidden p-4 sm:p-5"
     @click="emit('open', semester.id)"
   >
     <div class="flex items-start justify-between gap-3">
@@ -60,7 +60,7 @@ const formattedDate = computed(() => {
       </div>
     </div>
 
-    <div class="mt-5 flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-medium text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
+    <div class="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-xs font-medium text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
       <span>{{ subjectCount }} {{ subjectCount === 1 ? 'subject' : 'subjects' }}</span>
       <span class="flex items-center gap-1 font-semibold text-indigo-600 group-hover:translate-x-0.5 transition-transform dark:text-indigo-400">
         Open

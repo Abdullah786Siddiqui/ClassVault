@@ -92,7 +92,7 @@ onUnmounted(() => {
   position: fixed;
   left: 0; right: 0; bottom: 0;
   z-index: 51;
-  max-height: 92dvh;
+  max-height: min(88dvh, 48rem);
   overflow: hidden;
   border-top-left-radius: 1.5rem;
   border-top-right-radius: 1.5rem;
@@ -137,7 +137,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.875rem 1.25rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -169,8 +169,10 @@ onUnmounted(() => {
 
 .sheet-body {
   overflow-y: auto;
-  padding: 1.25rem;
+  padding: 1rem;
   flex: 1;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Transitions */
@@ -188,6 +190,13 @@ onUnmounted(() => {
   .slide-up-enter-from, .slide-up-leave-to {
     transform: translate(-50%, -46%) scale(0.97);
     opacity: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .sheet-panel {
+    max-height: min(88dvh, 48rem);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 </style>

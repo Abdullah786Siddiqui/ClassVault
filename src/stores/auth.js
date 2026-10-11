@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia'
 import {
   connectGoogleDrive,
-  trySilentTokenRestore,
   hasPreviouslyConnected,
 } from '../services/auth'
+import { getStoredAccessToken } from '../services/drive'
 import { useSyncStore } from './sync'
 
 export const useAuthStore = defineStore('auth', {
@@ -30,15 +30,27 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
-    /**
-     * Initializes authentication state on app launch (Fixes B13).
-     * Attempts silent restore so student does not have to reconnect on every reload.
-     */
+    /** Restore the saved connection status without opening a Google popup. */
     async initAuth() {
       const syncStore = useSyncStore()
       await syncStore.refreshCounts()
 
       this.hasConnectedBefore = await hasPreviouslyConnected()
+
+      if (getStoredAccessToken()) {
+        this.signedIn = true
+        this.status = navigator.onLine ? 'Google Drive ready' : 'Offline'
+        if (navigator.onLine) {
+          syncStore.syncNow().catch(() => undefined)
+        }
+        return
+      }
+
+      if (!navigator.onLine) {
+        this.signedIn = false
+        this.status = 'Offline'
+        return
+      }
 
       if (!this.hasConnectedBefore) {
         this.signedIn = false
@@ -46,26 +58,30 @@ export const useAuthStore = defineStore('auth', {
         return
       }
 
-      // Try silent restore
-      const result = await trySilentTokenRestore()
-      if (result.ok) {
-        this.signedIn = true
-        this.status = 'Google Drive ready'
-
-        // Trigger sync if online
-        if (navigator.onLine) {
-          syncStore.syncNow().catch(() => undefined)
-        }
-      } else {
-        this.signedIn = false
-        this.status = 'Reconnect required'
-      }
+      // GIS token requests use a popup, even with prompt=none. Wait for a user click.
+      this.signedIn = false
+      this.status = 'Reconnect required'
     },
 
     async connectGoogle() {
+      if (!navigator.onLine) {
+        this.signedIn = false
+        this.status = 'Offline'
+        return { ok: false, message: 'Connect to the internet before connecting Google Drive.' }
+      }
+
       this.reconnecting = true
-      const result = await connectGoogleDrive({ forcePrompt: true })
-      this.reconnecting = false
+      let result
+      try {
+        result = await connectGoogleDrive({ forcePrompt: true })
+      } catch (error) {
+        result = {
+          ok: false,
+          message: error?.message || 'Google Drive connection failed.',
+        }
+      } finally {
+        this.reconnecting = false
+      }
 
       if (!result.ok) {
         this.signedIn = false

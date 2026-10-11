@@ -76,7 +76,7 @@ const cardConfig = computed(() => {
 
 <template>
   <div
-    class="group relative flex flex-col justify-between overflow-hidden rounded-3xl bg-gradient-to-br p-4 sm:p-6 text-left shadow-lg transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:translate-y-0 active:shadow-md cursor-pointer"
+    class="exam-card group relative flex flex-col justify-between overflow-hidden rounded-2xl bg-gradient-to-br p-4 sm:rounded-3xl sm:p-6 text-left shadow-lg transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:translate-y-0 active:shadow-md cursor-pointer"
     :class="cardConfig.gradient"
     @click="emit('open', exam)"
   >
@@ -101,23 +101,23 @@ const cardConfig = computed(() => {
         </button>
       </div>
 
-      <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-xs">
+      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 backdrop-blur-xs sm:h-12 sm:w-12 sm:rounded-2xl">
         <component :is="cardConfig.icon" class="h-6 w-6 text-white" />
       </div>
     </div>
 
-    <div class="mt-6 sm:mt-8">
-      <h3 class="text-xl sm:text-2xl font-black tracking-tight text-white">
+    <div class="mt-4 sm:mt-8">
+      <h3 class="text-lg sm:text-2xl font-black tracking-tight text-white">
         {{ cardConfig.title }}
       </h3>
       <p class="mt-1 text-xs font-medium text-white/80">
         {{ cardConfig.description }}
       </p>
 
-      <div class="mt-4 sm:mt-6 flex items-center justify-between border-t border-white/20 pt-3 text-xs font-semibold text-white/90">
+      <div class="mt-3 sm:mt-6 flex items-center justify-between gap-2 border-t border-white/20 pt-2.5 text-xs font-semibold text-white/90">
         <span>{{ subjectCount }} {{ subjectCount === 1 ? 'subject' : 'subjects' }}</span>
         <span class="flex items-center gap-1 transition-transform group-hover:translate-x-1">
-          Open exam notes
+          Open
           <ChevronRight class="h-4 w-4" />
         </span>
       </div>

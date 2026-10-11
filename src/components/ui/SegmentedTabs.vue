@@ -17,7 +17,7 @@ defineEmits(['update:modelValue'])
 <template>
   <div
     role="tablist"
-    class="flex w-full gap-1.5 rounded-2xl bg-slate-200/70 p-1.5 backdrop-blur-xs dark:bg-slate-800/80 overflow-x-auto"
+    class="flex w-full gap-1 rounded-xl bg-slate-200/70 p-1 backdrop-blur-xs dark:bg-slate-800/80 overflow-x-auto sm:gap-1.5 sm:rounded-2xl sm:p-1.5"
     style="scrollbar-width: none; -ms-overflow-style: none;"
   >
     <button
@@ -26,7 +26,7 @@ defineEmits(['update:modelValue'])
       role="tab"
       :aria-selected="modelValue === tab.value"
       type="button"
-      class="relative flex min-h-[40px] flex-1 min-w-[5rem] items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all duration-200 select-none focus-visible:outline-2 focus-visible:outline-indigo-500 whitespace-nowrap"
+      class="relative flex min-h-[38px] flex-1 min-w-[4.5rem] items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-all duration-200 select-none focus-visible:outline-2 focus-visible:outline-indigo-500 whitespace-nowrap sm:min-h-[40px] sm:min-w-[5rem] sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
       :class="[
         modelValue === tab.value
           ? 'bg-white text-indigo-950 shadow-sm dark:bg-slate-700 dark:text-white'
@@ -34,11 +34,11 @@ defineEmits(['update:modelValue'])
       ]"
       @click="$emit('update:modelValue', tab.value)"
     >
-      <component :is="tab.icon" v-if="tab.icon" class="h-4 w-4 shrink-0" />
+      <component :is="tab.icon" v-if="tab.icon" class="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
       <span>{{ tab.label }}</span>
       <span
         v-if="typeof tab.count === 'number'"
-        class="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-xs font-bold transition-colors"
+        class="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold transition-colors sm:h-5 sm:min-w-[20px] sm:px-1.5 sm:text-xs"
         :class="[
           modelValue === tab.value
             ? 'bg-indigo-100 text-indigo-700 dark:bg-slate-600 dark:text-indigo-200'
@@ -57,4 +57,3 @@ div[role="tablist"]::-webkit-scrollbar {
   display: none;
 }
 </style>
-

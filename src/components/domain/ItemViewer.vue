@@ -108,9 +108,9 @@ async function handleOpenFile() {
       class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 sm:p-4 backdrop-blur-xs"
       @click.self="emit('close')"
     >
-      <div class="relative flex w-full max-h-[94dvh] sm:max-h-[92vh] sm:max-w-xl flex-col overflow-hidden sm:rounded-3xl rounded-t-3xl border-0 sm:border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+      <div class="relative flex w-full max-h-[90dvh] sm:max-h-[92vh] sm:max-w-xl flex-col overflow-hidden sm:rounded-3xl rounded-t-2xl border-0 sm:border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
         <!-- Header -->
-        <div class="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+        <div class="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800 sm:px-5 sm:py-4">
           <div class="flex items-center gap-2.5 min-w-0">
             <SyncStatusBadge :status="item.syncStatus" show-label />
             <span class="text-xs text-slate-400 dark:text-slate-500">{{ formattedDate }}</span>
@@ -148,7 +148,7 @@ async function handleOpenFile() {
         </div>
 
         <!-- Scrollable Content -->
-        <div class="flex-1 overflow-y-auto p-5 safe-bottom">
+        <div class="flex-1 overflow-y-auto p-4 safe-bottom sm:p-5">
           <!-- Text Note View / Edit -->
           <div v-if="item.type === 'text'">
             <div v-if="!isEditing" class="space-y-4">

@@ -69,7 +69,7 @@ onUnmounted(() => {
         role="alertdialog"
         aria-modal="true"
         :aria-labelledby="title"
-        class="fixed top-1/2 left-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+        class="fixed top-1/2 left-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-900 sm:rounded-3xl sm:p-6"
       >
         <div class="flex items-start gap-4">
           <div
@@ -88,7 +88,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="mt-6 flex gap-3">
+        <div class="mt-5 flex gap-2 sm:mt-6 sm:gap-3">
           <BaseButton
             variant="secondary"
             size="md"

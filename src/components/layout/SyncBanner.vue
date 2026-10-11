@@ -33,7 +33,7 @@ const failedCount = computed(() => syncStore.failedCount)
 // Main title: remaining offline status (Drive mein kitni cheezein nahi gayi hain)
 const statusTitle = computed(() => {
   if (!authStore.signedIn) {
-    return 'Google Drive Not Connected'
+    return authStore.hasConnectedBefore ? 'Reconnect to Google Drive' : 'Google Drive Not Connected'
   }
   if (!isOnline.value) {
     return `${pendingCount.value} ${pendingCount.value === 1 ? 'item' : 'items'} offline`
@@ -56,6 +56,9 @@ const statusTitle = computed(() => {
 // Subtitle: clear offline description
 const statusSubtitle = computed(() => {
   if (!authStore.signedIn) {
+    if (authStore.hasConnectedBefore) {
+      return `${pendingCount.value} ${pendingCount.value === 1 ? 'item' : 'items'} saved on this device · Reconnect Drive to sync`
+    }
     return `${pendingCount.value} ${pendingCount.value === 1 ? 'item' : 'items'} offline on device · Connect Drive to backup`
   }
   if (!isOnline.value) {
@@ -134,7 +137,7 @@ async function handleRetryFailed() {
 </script>
 
 <template>
-  <div class="mb-6 overflow-hidden rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-600 via-indigo-600 to-sky-600 p-4 sm:p-5 text-white shadow-md shadow-indigo-500/10 dark:border-indigo-900/40">
+  <div class="sync-banner mb-6 overflow-hidden rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-600 via-indigo-600 to-sky-600 p-4 sm:p-5 text-white shadow-md shadow-indigo-500/10 dark:border-indigo-900/40">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <!-- Status & Offline Items Info -->
       <div class="flex items-center gap-3 min-w-0">
@@ -142,7 +145,6 @@ async function handleRetryFailed() {
           <component
             :is="statusIcon"
             class="h-5 w-5 sm:h-6 sm:w-6 text-white"
-            :class="{ 'animate-spin': syncStore.isSyncing }"
           />
         </div>
 
@@ -188,12 +190,12 @@ async function handleRetryFailed() {
           v-else-if="failedCount > 0"
           variant="secondary"
           size="sm"
-          class="!bg-rose-500/90 !text-white !border-rose-400 hover:!bg-rose-600 font-bold"
+          class="sync-action !bg-rose-500/90 !text-white !border-rose-400 hover:!bg-rose-600 font-bold"
           :loading="syncStore.isSyncing"
           @click="handleRetryFailed"
         >
-          <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': syncStore.isSyncing }" />
-          <span>Retry ({{ failedCount }})</span>
+          <RefreshCw v-if="!syncStore.isSyncing" class="h-3.5 w-3.5" />
+          <span>{{ syncStore.isSyncing ? 'Retrying...' : `Retry (${failedCount})` }}</span>
         </BaseButton>
 
         <!-- Sync Now button -->
@@ -201,14 +203,26 @@ async function handleRetryFailed() {
           v-else
           variant="secondary"
           size="sm"
-          class="!bg-white/20 !text-white !border-white/20 hover:!bg-white/30 font-bold"
+          class="sync-action !bg-white/20 !text-white !border-white/20 hover:!bg-white/30 font-bold"
           :loading="syncStore.isSyncing"
           @click="handleSyncNow"
         >
-          <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': syncStore.isSyncing }" />
-          <span>{{ pendingCount > 0 ? `Upload (${pendingCount})` : 'Sync now' }}</span>
+          <RefreshCw v-if="!syncStore.isSyncing" class="h-3.5 w-3.5" />
+          <span>{{ syncStore.isSyncing ? 'Uploading...' : pendingCount > 0 ? `Upload (${pendingCount})` : 'Sync now' }}</span>
         </BaseButton>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+@media (max-width: 639px) {
+  .sync-banner {
+    border-radius: 1.25rem;
+  }
+
+  .sync-action {
+    width: 100%;
+  }
+}
+</style>

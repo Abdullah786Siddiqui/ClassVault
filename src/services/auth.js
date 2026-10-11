@@ -48,29 +48,6 @@ export async function connectGoogleDrive({ forcePrompt = false } = {}) {
   }
 }
 
-/**
- * Attempts a silent background token request on startup if user connected before (Fixes B13).
- */
-export async function trySilentTokenRestore() {
-  const previouslyConnected = await hasPreviouslyConnected()
-  if (!previouslyConnected) {
-    return { ok: false, silent: true, message: 'Not connected' }
-  }
-
-  const googleReady = await ensureGoogleAvailable()
-  if (!googleReady.ok) {
-    return { ok: false, silent: true, message: googleReady.message }
-  }
-
-  // Request token silently without popup (prompt: '')
-  const tokenResult = await requestDriveAccessToken({ forcePrompt: false })
-  if (tokenResult.ok) {
-    return { ok: true, accessToken: tokenResult.accessToken }
-  }
-
-  return { ok: false, silent: true, needReconnect: true, message: 'Session expired' }
-}
-
 export async function ensureGoogleSignedIn({ forceRefresh = false } = {}) {
   const result = await getDriveAccessToken({ forceRefresh })
   if (!result.ok) {

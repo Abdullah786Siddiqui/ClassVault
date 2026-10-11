@@ -303,7 +303,19 @@ export async function fetchDriveFileOnDemand(item) {
   }
 
   // 4. Download file blob from Drive
-  const downloadedBlob = await downloadDriveFile(item.driveFileId, auth.accessToken)
+  let downloadedBlob
+  try {
+    downloadedBlob = await downloadDriveFile(item.driveFileId, auth.accessToken)
+  } catch (err) {
+    if (err.message && (err.message.includes('404') || err.message.toLowerCase().includes('not found'))) {
+      if (item.blob) {
+        await db.items.update(item.id, { driveFileId: null, syncStatus: 'pending' })
+        return item.blob
+      }
+      throw new Error('This file was removed from Google Drive and is no longer on this device.')
+    }
+    throw err
+  }
 
   // 5. Cache downloaded blob locally in Dexie
   await db.filesCache.put({

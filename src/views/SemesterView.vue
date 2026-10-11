@@ -31,6 +31,10 @@ const termToDelete = ref(null)
 
 onMounted(async () => {
   await semesterStore.load()
+  if (!semester.value) {
+    toast.error('Semester not found')
+    router.replace('/')
+  }
 })
 
 const semester = computed(() =>

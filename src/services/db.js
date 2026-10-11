@@ -25,4 +25,16 @@ db.version(2).stores({
   filesCache: 'driveFileId, cachedAt',
 })
 
+export async function requestPersistentStorage() {
+  if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
+    try {
+      const isPersisted = await navigator.storage.persist()
+      return isPersisted
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
 export default db

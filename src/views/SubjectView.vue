@@ -35,6 +35,10 @@ onMounted(async () => {
     semesterStore.load(),
     authStore.refreshPendingCount(),
   ])
+  if (!semester.value) {
+    toast.error('Semester not found')
+    router.replace('/')
+  }
 })
 
 const examType = computed(() => route.params.exam || '')

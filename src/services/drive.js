@@ -10,7 +10,10 @@ const tokenState = {
 }
 
 function getClientId() {
-  return import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+  return (
+    import.meta.env.VITE_GOOGLE_CLIENT_ID ||
+    '525474378-8v09hhs6mi7hhfno7s6stj4ura4n38ui.apps.googleusercontent.com'
+  )
 }
 
 export async function resetDriveFolderCache() {

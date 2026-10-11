@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
+import { useToast } from '../../composables/useToast'
 import BottomSheet from '../ui/BottomSheet.vue'
 import SegmentedTabs from '../ui/SegmentedTabs.vue'
 import BaseButton from '../ui/BaseButton.vue'
@@ -21,6 +22,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'save'])
+const toast = useToast()
 
 const activeType = ref(props.initialType)
 const title = ref('')
@@ -72,9 +74,17 @@ function clearPreview() {
   }
 }
 
+const MAX_FILE_SIZE = 25 * 1024 * 1024 // 25 MB
+
 function handleFileSelection(event) {
   const file = event.target.files?.[0]
   if (!file) return
+
+  if (file.size > MAX_FILE_SIZE) {
+    toast.error('File size exceeds 25MB limit. Please select a smaller file.')
+    event.target.value = ''
+    return
+  }
 
   selectedFile.value = file
   clearPreview()

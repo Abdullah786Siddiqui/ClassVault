@@ -2,7 +2,6 @@
 import { ref, watch, computed } from 'vue'
 import { useToast } from '../../composables/useToast'
 import BottomSheet from '../ui/BottomSheet.vue'
-import SegmentedTabs from '../ui/SegmentedTabs.vue'
 import BaseButton from '../ui/BaseButton.vue'
 import BaseInput from '../ui/BaseInput.vue'
 import BaseTextarea from '../ui/BaseTextarea.vue'
@@ -34,11 +33,14 @@ const cameraInputRef = ref(null)
 const galleryInputRef = ref(null)
 const fileInputRef = ref(null)
 
-const typeTabs = [
-  { value: 'text', label: 'Note', icon: FileText },
-  { value: 'photo', label: 'Photo', icon: Camera },
-  { value: 'file', label: 'File', icon: UploadCloud },
-]
+const sheetTitle = computed(() => {
+  const typeLabels = {
+    text: 'Add note',
+    photo: 'Add photo',
+    file: 'Add file',
+  }
+  return typeLabels[activeType.value] || 'Add to Subject'
+})
 
 watch(
   () => props.open,
@@ -149,11 +151,8 @@ function handleSave() {
 </script>
 
 <template>
-  <BottomSheet :open="open" title="Add to Subject" @close="emit('close')">
+  <BottomSheet :open="open" :title="sheetTitle" @close="emit('close')">
     <div class="space-y-4">
-      <!-- Mode Tabs -->
-      <SegmentedTabs v-model="activeType" :tabs="typeTabs" />
-
       <!-- Text Note Form -->
       <div v-if="activeType === 'text'" class="space-y-3 pt-1">
         <BaseInput

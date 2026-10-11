@@ -99,6 +99,7 @@ async function handleSaveItem(payload) {
       exam: route.params.exam,
     })
 
+    activeTab.value = payload.type
     await authStore.refreshPendingCount()
     isAddSheetOpen.value = false
     toast.success('Saved. Uploading when online')

@@ -65,6 +65,7 @@ function getRetryDelay(retryCount) {
 }
 
 import { optimizeImage, generateThumbnail } from '../utils/image'
+import { showSyncProgressNotification, showSyncCompleteNotification } from './notifications'
 export { generateThumbnail }
 
 /**
@@ -145,6 +146,9 @@ export async function syncPendingItems(onProgress) {
       let uploaded = 0
       let activeIndex = 0
 
+      // Show initial single notification in Android notification drawer
+      showSyncProgressNotification({ current: 0, total: itemsToSync.length }).catch(() => undefined)
+
       async function syncWorker() {
         while (activeIndex < itemsToSync.length) {
           const currentIndex = activeIndex++
@@ -222,6 +226,9 @@ export async function syncPendingItems(onProgress) {
             })
 
             uploaded += 1
+
+            // Update the single ongoing notification in-place
+            showSyncProgressNotification({ current: uploaded, total: itemsToSync.length }).catch(() => undefined)
           } catch (error) {
             console.error(`[ClassVault Sync] item ${candidate.id} failed:`, error)
             const nextRetryCount = (candidate.retryCount || 0) + 1
@@ -238,6 +245,10 @@ export async function syncPendingItems(onProgress) {
 
       const workerCount = Math.min(2, itemsToSync.length)
       await Promise.all(Array.from({ length: workerCount }, () => syncWorker()))
+
+      if (uploaded > 0) {
+        showSyncCompleteNotification(uploaded).catch(() => undefined)
+      }
 
       return { ok: true, uploaded, total: itemsToSync.length }
     } finally {

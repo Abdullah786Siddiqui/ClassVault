@@ -5,6 +5,7 @@ import { useItemStore } from '../stores/items'
 import { useSemesterStore } from '../stores/semesters'
 import { useAuthStore } from '../stores/auth'
 import { registerBackgroundSync } from '../services/backgroundSync'
+import { requestNotificationPermission } from '../services/notifications'
 import { useToast } from '../composables/useToast'
 import PageHeader from '../components/ui/PageHeader.vue'
 import SegmentedTabs from '../components/ui/SegmentedTabs.vue'
@@ -113,6 +114,9 @@ async function handleSaveItem(payload) {
         ? `Saved ${payloads.length} photos on this device.`
         : 'Saved on this device.',
     )
+
+    // Request system notification permission on first upload so progress shows in Android drawer
+    requestNotificationPermission().catch(() => undefined)
 
     // ALWAYS register background sync immediately so Android Chrome finishes
     // remaining items in background even if the student closes or swipes away the app!

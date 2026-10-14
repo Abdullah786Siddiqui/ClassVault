@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useSyncStore } from '../../stores/sync'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 import { registerBackgroundSync } from '../../services/backgroundSync'
+import { requestNotificationPermission } from '../../services/notifications'
 import ToastHost from '../ui/ToastHost.vue'
 import BaseButton from '../ui/BaseButton.vue'
 import { BookOpen, Download } from '../ui/icons.js'
@@ -78,6 +79,7 @@ async function handleSyncClick() {
   }
 
   try {
+    requestNotificationPermission().catch(() => undefined)
     toast.info(pendingCount.value > 0 ? `Syncing ${pendingCount.value} item(s) to Drive...` : 'Checking Google Drive...')
     const result = await syncStore.syncNow()
     if (result.ok) {

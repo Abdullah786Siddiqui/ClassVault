@@ -155,10 +155,11 @@ export const useSemesterStore = defineStore('semester', {
         throw err
       }
 
+      const semesterIdNum = Number(id)
       await db.transaction('rw', db.semesters, db.subjects, db.items, db.filesCache, async () => {
         await removeItemsLocally(itemsToDelete)
-        await db.semesters.delete(id)
-        await db.subjects.where({ semesterId: id }).delete()
+        await db.semesters.delete(semesterIdNum)
+        await db.subjects.where('semesterId').equals(semesterIdNum).delete()
       })
       await this.load()
     },

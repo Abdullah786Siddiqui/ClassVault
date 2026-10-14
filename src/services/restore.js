@@ -3,6 +3,7 @@ import {
   downloadDriveFile,
   getDriveAccessToken,
   listDriveFiles,
+  requestDriveUrl,
 } from './drive'
 
 const ROOT_FOLDER_NAMES = new Set(['classvault', 'class notes vault'])
@@ -226,20 +227,46 @@ export async function restoreLibraryFromDrive() {
       !liveDriveIds.has(item.driveFileId),
   )
 
-  if (removedItems.length) {
-    await db.transaction('rw', db.items, db.filesCache, async () => {
-      for (const item of removedItems) {
-        await db.items.delete(item.id)
-        await db.filesCache.delete(item.driveFileId)
+  let actuallyRemoved = 0
+  // Safety guard: only remove items if we had a non-empty Drive crawl, and individually verify they are truly gone from Drive
+  if (removedItems.length && liveDriveIds.size > 0) {
+    const verifiedRemoved = []
+    for (const item of removedItems) {
+      // If the item still has a local full blob, do not delete it!
+      if (item.blob) continue
+      try {
+        const checkRes = await requestDriveUrl(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.driveFileId)}?fields=id,trashed`,
+          auth.accessToken,
+        )
+        const checkData = await checkRes.json()
+        if (checkData.trashed) {
+          verifiedRemoved.push(item)
+        }
+      } catch (err) {
+        // 404 means truly deleted on Drive
+        if (err.message && (err.message.includes('404') || err.message.toLowerCase().includes('not found'))) {
+          verifiedRemoved.push(item)
+        }
       }
-    })
+    }
+
+    if (verifiedRemoved.length) {
+      await db.transaction('rw', db.items, db.filesCache, async () => {
+        for (const item of verifiedRemoved) {
+          await db.items.delete(item.id)
+          await db.filesCache.delete(item.driveFileId)
+        }
+      })
+      actuallyRemoved = verifiedRemoved.length
+    }
   }
 
   return {
     ok: true,
     imported,
     updated,
-    removed: removedItems.length,
+    removed: actuallyRemoved,
     skipped,
     total: files.length,
   }

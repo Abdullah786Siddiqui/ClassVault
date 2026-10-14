@@ -56,6 +56,9 @@ export async function setStoredUserEmail(email) {
 
 export async function resetDriveFolderCache() {
   await db.driveFolders.clear()
+  if (typeof folderIdMemCache !== 'undefined') {
+    folderIdMemCache.clear()
+  }
 }
 
 export async function renameDriveFolderPath(oldRawPath, newRawPath) {
@@ -484,7 +487,7 @@ function getRootedFolderPath(value) {
   return `${ROOT_FOLDER_NAME}/${normalized}`
 }
 
-async function requestDriveUrl(url, accessToken, options = {}, isRetry = false) {
+export async function requestDriveUrl(url, accessToken, options = {}, isRetry = false) {
   let token = accessToken || getStoredAccessToken()
   const response = await fetch(url, {
     ...options,
@@ -656,16 +659,24 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
   }
 
   if (item.driveFileId) {
-    const mediaResponse = await requestDriveUrl(
-      `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(item.driveFileId)}?uploadType=media&fields=id,name,modifiedTime`,
-      accessToken,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': contentType },
-        body: payloadBlob,
-      },
-    )
-    const mediaResult = await mediaResponse.json()
+    let modifiedTime = ''
+    const hasMediaToUpload = item.type === 'text' || Boolean(item.blob)
+
+    // Only upload binary content if we actually have media; never overwrite with an empty blob on metadata edit!
+    if (hasMediaToUpload) {
+      const mediaResponse = await requestDriveUrl(
+        `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(item.driveFileId)}?uploadType=media&fields=id,name,modifiedTime`,
+        accessToken,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': contentType },
+          body: payloadBlob,
+        },
+      )
+      const mediaResult = await mediaResponse.json()
+      modifiedTime = mediaResult.modifiedTime || ''
+    }
+
     const metadataResponse = await requestDriveUrl(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.driveFileId)}?fields=id,name,modifiedTime`,
       accessToken,
@@ -675,9 +686,10 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
         body: JSON.stringify(metadata),
       },
     )
+    const metaResult = await metadataResponse.json()
     return {
-      ...(await metadataResponse.json()),
-      modifiedTime: mediaResult.modifiedTime,
+      ...metaResult,
+      modifiedTime: modifiedTime || metaResult.modifiedTime,
       updated: true,
     }
   }

@@ -28,12 +28,22 @@ export async function requestNotificationPermission() {
   }
 }
 
+export function canShowNotification() {
+  if (typeof self !== 'undefined' && self.registration && typeof self.registration.showNotification === 'function') {
+    return true
+  }
+  if (typeof Notification !== 'undefined') {
+    return Notification.permission === 'granted'
+  }
+  return false
+}
+
 export function isNotificationSupported() {
-  return typeof Notification !== 'undefined'
+  return canShowNotification()
 }
 
 export function hasNotificationPermission() {
-  return typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  return canShowNotification()
 }
 
 function buildProgressBar(current, total) {
@@ -59,7 +69,7 @@ async function getRegistration() {
 }
 
 export async function showSyncProgressNotification({ current, total }) {
-  if (!isNotificationSupported() || Notification.permission !== 'granted') {
+  if (!canShowNotification()) {
     return
   }
 
@@ -85,18 +95,34 @@ export async function showSyncProgressNotification({ current, total }) {
   }
 }
 
-export async function showSyncCompleteNotification(total) {
-  if (!isNotificationSupported() || Notification.permission !== 'granted') {
+export async function showSyncCompleteNotification(options = {}) {
+  if (!canShowNotification()) {
     return
   }
 
   const registration = await getRegistration()
   if (!registration) return
 
+  // Handle both showSyncCompleteNotification(5) and showSyncCompleteNotification({ uploaded: 3, failedCount: 2, total: 5 })
+  const uploaded = typeof options === 'number' ? options : (options.uploaded || 0)
+  const failedCount = typeof options === 'object' ? (options.failedCount || 0) : 0
+  const total = typeof options === 'object' ? (options.total || uploaded) : uploaded
+
+  let title = 'ClassVault · Sync Complete ✓'
+  let body = `All ${uploaded} files are safely synced to Google Drive.`
+
+  if (failedCount > 0 && uploaded > 0) {
+    title = 'ClassVault · Sync Warning ⚠️'
+    body = `Synced ${uploaded}/${total} files. ${failedCount} waiting for retry.`
+  } else if (failedCount > 0 && uploaded === 0) {
+    title = 'ClassVault · Sync Paused ⚠️'
+    body = `Could not upload ${total} file(s). Will retry when online.`
+  }
+
   try {
-    await registration.showNotification('ClassVault · Sync Complete ✓', {
+    await registration.showNotification(title, {
       tag: SYNC_TAG,
-      body: `All ${total} files are safely synced to Google Drive.`,
+      body,
       icon: '/pwa-192x192.png',
       badge: '/pwa-192x192.png',
       renotify: false,
@@ -105,7 +131,7 @@ export async function showSyncCompleteNotification(total) {
       data: { url: '/' },
     })
 
-    // Auto-dismiss the completed notification after 6 seconds
+    // Auto-dismiss the completed/warning notification after 6 seconds
     setTimeout(async () => {
       try {
         const notifications = await registration.getNotifications({ tag: SYNC_TAG })

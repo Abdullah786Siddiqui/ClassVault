@@ -81,20 +81,19 @@ async function handleFetchFromDrive() {
 }
 
 async function handleOpenFile() {
-  const popup = window.open('about:blank', '_blank')
-  if (!popup) {
-    toast.error('Allow pop-ups to open this file.')
-    return
-  }
-
   const blob = props.item?.blob || downloadedBlob.value || await handleFetchFromDrive()
-  if (!blob) {
-    popup.close()
-    return
-  }
+  if (!blob) return
 
   const url = URL.createObjectURL(blob)
-  popup.location.replace(url)
+  const safeName = props.item.fileName || props.item.title || 'file'
+
+  const a = document.createElement('a')
+  a.href = url
+  a.download = safeName
+  a.target = '_blank'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
   setTimeout(() => URL.revokeObjectURL(url), 60000)
 }
 </script>

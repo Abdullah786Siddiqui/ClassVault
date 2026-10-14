@@ -34,8 +34,9 @@ export const useSyncStore = defineStore('sync', {
 
     /**
      * Centralized sync runner using single in-flight lock (Fixes B4).
+     * fullMirror: only true when user explicitly restores or connects Drive for first time.
      */
-    async syncNow() {
+    async syncNow({ fullMirror = false } = {}) {
       if (this.isSyncing) return { ok: true, inProgress: true }
 
       this.isSyncing = true
@@ -48,7 +49,7 @@ export const useSyncStore = defineStore('sync', {
         })
 
         let result = uploadResult
-        if (uploadResult.ok && navigator.onLine) {
+        if (fullMirror && uploadResult.ok && navigator.onLine) {
           try {
             const mirrorResult = await restoreLibraryFromDrive()
             if (!mirrorResult.ok) {

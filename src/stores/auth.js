@@ -153,7 +153,7 @@ export const useAuthStore = defineStore('auth', {
       this.status = 'Google Drive ready'
 
       const syncStore = useSyncStore()
-      const syncResult = await syncStore.syncNow()
+      const syncResult = await syncStore.syncNow({ fullMirror: true })
 
       return syncResult.mirrorError
         ? { ...result, mirrorError: syncResult.mirrorError }

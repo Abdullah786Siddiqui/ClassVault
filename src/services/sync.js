@@ -114,14 +114,29 @@ export async function retryFailedItems() {
 /**
  * Upload pending items to Google Drive with locking and thumbnail persistence (Fixes B3, B4).
  */
+const SYNC_LOCK_KEY = 'classvault.syncLock'
+const SYNC_LOCK_TTL_MS = 45000 // 45s TTL
+
 export async function syncPendingItems(onProgress) {
-  // If an upload is already running, wait for it instead of starting another (Fixes B4)
+  // 1. Thread-local in-flight sync lock (Fixes B4)
   if (inFlightSyncPromise) {
     return inFlightSyncPromise
   }
 
   inFlightSyncPromise = (async () => {
+    let lockAcquired = false
     try {
+      // 2. Cross-context lock (prevents window & service worker from stepping on each other)
+      const existingLock = await db.settings.get(SYNC_LOCK_KEY)
+      if (existingLock?.value) {
+        const lockAge = Date.now() - Number(existingLock.value)
+        if (lockAge < SYNC_LOCK_TTL_MS) {
+          return { ok: true, inProgress: true }
+        }
+      }
+      await db.settings.put({ key: SYNC_LOCK_KEY, value: String(Date.now()) })
+      lockAcquired = true
+
       // First, recover any stale uploading states
       await recoverStuckUploadingItems()
 
@@ -131,19 +146,21 @@ export async function syncPendingItems(onProgress) {
       }
 
       const now = Date.now()
-      const itemsToSync = await db.items
-        .filter(
-          (item) =>
-            item.syncStatus === 'pending' ||
-            (item.syncStatus === 'failed' && (!item.retryAt || item.retryAt <= now)),
-        )
-        .toArray()
+      // Fast index queries using IndexedDB B-tree indexes instead of full table scan
+      const [pendingItems, failedItems] = await Promise.all([
+        db.items.where('syncStatus').equals('pending').toArray(),
+        db.items.where('syncStatus').equals('failed').toArray(),
+      ])
+
+      const eligibleFailed = failedItems.filter((item) => !item.retryAt || item.retryAt <= now)
+      const itemsToSync = [...pendingItems, ...eligibleFailed]
 
       if (!itemsToSync.length) {
         return { ok: true, uploaded: 0, total: 0 }
       }
 
       let uploaded = 0
+      let failedCount = 0
       let activeIndex = 0
 
       // Show initial single notification in Android notification drawer
@@ -187,6 +204,7 @@ export async function syncPendingItems(onProgress) {
                 errorMessage: 'Missing semester or subject data.',
                 updatedAt: new Date().toISOString(),
               })
+              failedCount += 1
               continue
             }
 
@@ -231,6 +249,7 @@ export async function syncPendingItems(onProgress) {
             showSyncProgressNotification({ current: uploaded, total: itemsToSync.length }).catch(() => undefined)
           } catch (error) {
             console.error(`[ClassVault Sync] item ${candidate.id} failed:`, error)
+            failedCount += 1
             const nextRetryCount = (candidate.retryCount || 0) + 1
             await db.items.update(candidate.id, {
               syncStatus: 'failed',
@@ -246,12 +265,20 @@ export async function syncPendingItems(onProgress) {
       const workerCount = Math.min(2, itemsToSync.length)
       await Promise.all(Array.from({ length: workerCount }, () => syncWorker()))
 
-      if (uploaded > 0) {
-        showSyncCompleteNotification(uploaded).catch(() => undefined)
+      // Always notify completion/status so notifications are never stuck
+      if (uploaded > 0 || failedCount > 0) {
+        showSyncCompleteNotification({
+          uploaded,
+          failedCount,
+          total: itemsToSync.length,
+        }).catch(() => undefined)
       }
 
-      return { ok: true, uploaded, total: itemsToSync.length }
+      return { ok: true, uploaded, failed: failedCount, total: itemsToSync.length }
     } finally {
+      if (lockAcquired) {
+        await db.settings.delete(SYNC_LOCK_KEY).catch(() => undefined)
+      }
       inFlightSyncPromise = null
     }
   })()

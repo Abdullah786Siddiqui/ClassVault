@@ -64,93 +64,8 @@ function getRetryDelay(retryCount) {
   return Math.min(1000 * 2 ** Math.min(retryCount || 0, 6), 300000)
 }
 
-/**
- * Generate a ~400px JPEG thumbnail for photos before local blob is dropped (Fixes B3).
- */
-export async function generateThumbnail(blob, maxDimension = 400) {
-  if (!blob || !(blob instanceof Blob) || !blob.type.startsWith('image/')) {
-    return null
-  }
-
-  if (typeof createImageBitmap === 'function' && typeof OffscreenCanvas === 'function') {
-    try {
-      const image = await createImageBitmap(blob)
-      if (image.width <= maxDimension && image.height <= maxDimension) {
-        image.close()
-        return blob
-      }
-
-      const scale = Math.min(maxDimension / image.width, maxDimension / image.height)
-      const width = Math.round(image.width * scale)
-      const height = Math.round(image.height * scale)
-      const canvas = new OffscreenCanvas(width, height)
-      const context = canvas.getContext('2d')
-      if (!context) {
-        image.close()
-        return null
-      }
-
-      context.drawImage(image, 0, 0, width, height)
-      image.close()
-      return await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.75 })
-    } catch {
-      return null
-    }
-  }
-
-  if (typeof Image === 'undefined' || typeof document === 'undefined') {
-    return null
-  }
-
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(blob)
-    const img = new Image()
-
-    img.onload = () => {
-      URL.revokeObjectURL(url)
-      let { width, height } = img
-
-      if (width <= maxDimension && height <= maxDimension) {
-        resolve(blob)
-        return
-      }
-
-      if (width > height) {
-        height = Math.round((height * maxDimension) / width)
-        width = maxDimension
-      } else {
-        width = Math.round((width * maxDimension) / height)
-        height = maxDimension
-      }
-
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const ctx = canvas.getContext('2d')
-
-      if (!ctx) {
-        resolve(null)
-        return
-      }
-
-      ctx.drawImage(img, 0, 0, width, height)
-      canvas.toBlob(
-        (thumb) => {
-          resolve(thumb)
-        },
-        'image/jpeg',
-        0.75,
-      )
-    }
-
-    img.onerror = () => {
-      URL.revokeObjectURL(url)
-      resolve(null)
-    }
-
-    img.src = url
-  })
-}
+import { optimizeImage, generateThumbnail } from '../utils/image'
+export { generateThumbnail }
 
 /**
  * Recover any items stuck in 'uploading' state due to app reload or crash (Fixes B4).
@@ -228,87 +143,101 @@ export async function syncPendingItems(onProgress) {
       }
 
       let uploaded = 0
+      let activeIndex = 0
 
-      for (let index = 0; index < itemsToSync.length; index++) {
-        const candidate = itemsToSync[index]
-        let item = candidate
+      async function syncWorker() {
+        while (activeIndex < itemsToSync.length) {
+          const currentIndex = activeIndex++
+          const candidate = itemsToSync[currentIndex]
+          let item = candidate
 
-        try {
-          item = await db.transaction('rw', db.items, async () => {
-            const current = await db.items.get(candidate.id)
-            if (!current || current.syncStatus === 'uploading' || current.syncStatus === 'synced') {
-              return null
-            }
-            if (current.syncStatus === 'failed' && current.retryAt && current.retryAt > Date.now()) {
-              return null
-            }
-            await db.items.update(current.id, {
-              syncStatus: 'uploading',
-              updatedAt: new Date().toISOString(),
+          try {
+            item = await db.transaction('rw', db.items, async () => {
+              const current = await db.items.get(candidate.id)
+              if (!current || current.syncStatus === 'uploading' || current.syncStatus === 'synced') {
+                return null
+              }
+              if (current.syncStatus === 'failed' && current.retryAt && current.retryAt > Date.now()) {
+                return null
+              }
+              await db.items.update(current.id, {
+                syncStatus: 'uploading',
+                updatedAt: new Date().toISOString(),
+              })
+              return { ...current, syncStatus: 'uploading' }
             })
-            return { ...current, syncStatus: 'uploading' }
-          })
-          if (!item) continue
+            if (!item) continue
 
-          if (typeof onProgress === 'function') {
-            onProgress({ current: index + 1, total: itemsToSync.length, item })
-          }
+            if (typeof onProgress === 'function') {
+              onProgress({ current: currentIndex + 1, total: itemsToSync.length, item })
+            }
 
-          const semester = await db.semesters.get(item.semesterId)
-          const subject = await db.subjects.get(item.subjectId)
+            const semester = await db.semesters.get(item.semesterId)
+            const subject = await db.subjects.get(item.subjectId)
 
-          if (!semester || !subject) {
+            if (!semester || !subject) {
+              await db.items.update(item.id, {
+                syncStatus: 'failed',
+                retryAt: Date.now() + getRetryDelay((item.retryCount || 0) + 1),
+                retryCount: (item.retryCount || 0) + 1,
+                errorMessage: 'Missing semester or subject data.',
+                updatedAt: new Date().toISOString(),
+              })
+              continue
+            }
+
+            const folderPath = getFolderPath(item, semester, subject)
+            let payload = prepareDrivePayload(item)
+
+            // Generate thumbnail & compress large photos before uploading (Fixes B3, B4)
+            let thumbBlob = item.thumbBlob
+            if (item.type === 'photo' && item.blob) {
+              if (!thumbBlob) {
+                thumbBlob = await generateThumbnail(item.blob)
+              }
+              if (item.blob.size > 1.5 * 1024 * 1024) {
+                const optimized = await optimizeImage(item.blob)
+                payload.blob = optimized
+                payload.fileSize = optimized.size
+              }
+            }
+
+            const result = await uploadItemToDrive({
+              item: payload,
+              folderPath,
+              accessToken: auth.accessToken,
+            })
+
+            // Mark synced: preserve thumbBlob, clear full blob to save storage
             await db.items.update(item.id, {
-              syncStatus: 'failed',
-              retryAt: Date.now() + getRetryDelay((item.retryCount || 0) + 1),
-              retryCount: (item.retryCount || 0) + 1,
-              errorMessage: 'Missing semester or subject data.',
+              syncStatus: 'synced',
+              driveFileId: result.id,
+              driveModifiedTime: result.modifiedTime || '',
+              errorMessage: '',
+              retryAt: 0,
+              retryCount: 0,
+              blob: null,
+              thumbBlob: thumbBlob || null,
               updatedAt: new Date().toISOString(),
             })
-            continue
+
+            uploaded += 1
+          } catch (error) {
+            console.error(`[ClassVault Sync] item ${candidate.id} failed:`, error)
+            const nextRetryCount = (candidate.retryCount || 0) + 1
+            await db.items.update(candidate.id, {
+              syncStatus: 'failed',
+              retryAt: Date.now() + getRetryDelay(nextRetryCount),
+              retryCount: nextRetryCount,
+              errorMessage: error.message || 'Upload failed.',
+              updatedAt: new Date().toISOString(),
+            })
           }
-
-          const folderPath = getFolderPath(item, semester, subject)
-          const payload = prepareDrivePayload(item)
-
-          // Generate thumbnail before uploading and removing the full blob (Fixes B3)
-          let thumbBlob = item.thumbBlob
-          if (item.type === 'photo' && item.blob && !thumbBlob) {
-            thumbBlob = await generateThumbnail(item.blob)
-          }
-
-          const result = await uploadItemToDrive({
-            item: payload,
-            folderPath,
-            accessToken: auth.accessToken,
-          })
-
-          // Mark synced: preserve thumbBlob, clear full blob to save storage
-          await db.items.update(item.id, {
-            syncStatus: 'synced',
-            driveFileId: result.id,
-            driveModifiedTime: result.modifiedTime || '',
-            errorMessage: '',
-            retryAt: 0,
-            retryCount: 0,
-            blob: null,
-            thumbBlob: thumbBlob || null,
-            updatedAt: new Date().toISOString(),
-          })
-
-          uploaded += 1
-        } catch (error) {
-          console.error(`[ClassVault Sync] item ${item.id} failed:`, error)
-          const nextRetryCount = (item.retryCount || 0) + 1
-          await db.items.update(item.id, {
-            syncStatus: 'failed',
-            retryAt: Date.now() + getRetryDelay(nextRetryCount),
-            retryCount: nextRetryCount,
-            errorMessage: error.message || 'Upload failed.',
-            updatedAt: new Date().toISOString(),
-          })
         }
       }
+
+      const workerCount = Math.min(2, itemsToSync.length)
+      await Promise.all(Array.from({ length: workerCount }, () => syncWorker()))
 
       return { ok: true, uploaded, total: itemsToSync.length }
     } finally {

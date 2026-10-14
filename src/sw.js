@@ -50,6 +50,12 @@ self.addEventListener('sync', (event) => {
   }
 })
 
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'classvault-periodic-sync') {
+    event.waitUntil(runBackgroundSync())
+  }
+})
+
 self.addEventListener('install', () => {
   self.skipWaiting()
 })
@@ -61,5 +67,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting()
+  } else if (event.data?.type === 'TRIGGER_SYNC') {
+    event.waitUntil(runBackgroundSync())
   }
 })

@@ -5,6 +5,7 @@ import { useToast } from '../../composables/useToast'
 import { useAuthStore } from '../../stores/auth'
 import { useSyncStore } from '../../stores/sync'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
+import { registerBackgroundSync } from '../../services/backgroundSync'
 import ToastHost from '../ui/ToastHost.vue'
 import BaseButton from '../ui/BaseButton.vue'
 import { BookOpen, Download } from '../ui/icons.js'
@@ -97,12 +98,10 @@ onMounted(async () => {
   initTheme()
   try {
     await syncStore.refreshCounts()
-    // When the app opens, if any items are on phone but not synced yet, notify cleanly with a toast!
     if (syncStore.pendingCount > 0) {
+      registerBackgroundSync().catch(() => undefined)
       if (typeof navigator !== 'undefined' && navigator.onLine && authStore.signedIn) {
-        toast.info(`${syncStore.pendingCount} offline item${syncStore.pendingCount > 1 ? 's' : ''} syncing to Drive...`)
-      } else {
-        toast.info(`${syncStore.pendingCount} item${syncStore.pendingCount > 1 ? 's' : ''} saved on this device (offline).`)
+        syncStore.syncNow().catch(() => undefined)
       }
     }
   } catch (e) {

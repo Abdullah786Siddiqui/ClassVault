@@ -5,7 +5,7 @@ import router from './router'
 import { useAuthStore } from './stores/auth'
 import { useSyncStore } from './stores/sync'
 import { useItemStore } from './stores/items'
-import { listenForBackgroundSync } from './services/backgroundSync'
+import { listenForBackgroundSync, registerBackgroundSync } from './services/backgroundSync'
 import './style.css'
 
 const app = createApp(App)
@@ -23,6 +23,7 @@ if ('storage' in navigator && 'persist' in navigator.storage) {
 // Initialize authentication and attempt silent token restore on launch (Fixes B13)
 const authStore = useAuthStore(pinia)
 authStore.initAuth().catch(() => undefined)
+registerBackgroundSync().catch(() => undefined)
 
 listenForBackgroundSync(async () => {
   const syncStore = useSyncStore(pinia)

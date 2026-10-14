@@ -103,40 +103,41 @@ async function confirmDeleteSemester() {
     </section>
 
     <!-- Semesters Section Header & Search -->
-    <div class="library-section-heading flex-col gap-3 sm:flex-row sm:items-center">
-      <div>
-        <h2 class="text-xl font-extrabold tracking-tight sm:text-2xl" style="color: var(--color-text)">
-          Academic Semesters
-        </h2>
-        <p class="text-xs font-medium" style="color: var(--color-text-muted)">
-          {{ semesterStore.semesters.length }} {{ semesterStore.semesters.length === 1 ? 'semester' : 'semesters' }} recorded
-        </p>
-      </div>
-
-      <div class="flex w-full items-center gap-2 sm:w-auto">
-        <!-- Search filter if user has multiple semesters -->
-        <div
-          v-if="semesterStore.semesters.length > 2"
-          class="relative flex-1 sm:w-52"
-        >
-          <Search class="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 pointer-events-none" />
-          <input
-            v-model="searchQuery"
-            type="search"
-            placeholder="Filter terms..."
-            class="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-800 placeholder-slate-400 outline-none transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:placeholder-slate-500"
-          />
+    <div class="mb-5 flex flex-col gap-3">
+      <!-- Title + Add Semester Button in ONE Row on mobile and desktop -->
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <h2 class="truncate text-lg font-extrabold tracking-tight sm:text-2xl" style="color: var(--color-text)">
+            Semesters
+          </h2>
+          <p class="truncate text-xs font-medium" style="color: var(--color-text-muted)">
+            {{ semesterStore.semesters.length }} {{ semesterStore.semesters.length === 1 ? 'semester' : 'semesters' }} recorded
+          </p>
         </div>
 
         <BaseButton
           variant="primary"
           size="sm"
-          class="shrink-0"
+          class="shrink-0 whitespace-nowrap"
           @click="isAddSheetOpen = true"
         >
           <Plus class="h-4 w-4" />
           <span>Add semester</span>
         </BaseButton>
+      </div>
+
+      <!-- Search filter if user has multiple semesters -->
+      <div
+        v-if="semesterStore.semesters.length > 2"
+        class="relative w-full sm:max-w-xs"
+      >
+        <Search class="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <input
+          v-model="searchQuery"
+          type="search"
+          placeholder="Filter semesters..."
+          class="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-800 placeholder-slate-400 outline-none transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:placeholder-slate-500"
+        />
       </div>
     </div>
 

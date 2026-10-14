@@ -114,13 +114,15 @@ async function handleSaveItem(payload) {
         : 'Saved on this device.',
     )
 
+    // ALWAYS register background sync immediately so Android Chrome finishes
+    // remaining items in background even if the student closes or swipes away the app!
+    registerBackgroundSync().catch(() => undefined)
+
     if (navigator.onLine && authStore.signedIn) {
-      const result = await authStore.syncNow()
-      if (!result.ok || result.mirrorError) {
-        toast.error(result.reason || result.mirrorError || 'Could not sync the saved item.')
-      }
-    } else if (!navigator.onLine && authStore.signedIn) {
-      registerBackgroundSync().catch(() => undefined)
+      // Start syncing non-blockingly without freezing or requiring the user to wait
+      authStore.syncNow().catch((err) => {
+        console.warn('[ClassVault] Foreground sync error, background sync will continue:', err)
+      })
     }
   } catch (err) {
     toast.error(err?.message || 'Failed to save item to Vault')

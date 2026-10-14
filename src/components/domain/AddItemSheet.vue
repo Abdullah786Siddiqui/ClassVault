@@ -6,6 +6,7 @@ import BaseButton from '../ui/BaseButton.vue'
 import BaseInput from '../ui/BaseInput.vue'
 import BaseTextarea from '../ui/BaseTextarea.vue'
 import { formatFileSize } from '../../utils/format'
+import { optimizeImage, generateThumbnail } from '../../utils/image'
 import { FileText, Camera, UploadCloud, Image as ImageIcon, FileUp, X } from '../ui/icons.js'
 
 const props = defineProps({
@@ -24,6 +25,7 @@ const emit = defineEmits(['close', 'save'])
 const toast = useToast()
 
 const activeType = ref(props.initialType)
+const isProcessing = ref(false)
 const title = ref('')
 const noteText = ref('')
 const caption = ref('')
@@ -148,8 +150,8 @@ const canSave = computed(() => {
     : Boolean(selectedFile.value)
 })
 
-function handleSave() {
-  if (!canSave.value) return
+async function handleSave() {
+  if (!canSave.value || isProcessing.value) return
 
   if (activeType.value === 'text') {
     const noteTitle = title.value.trim() || 'Note'
@@ -164,18 +166,29 @@ function handleSave() {
   }
 
   if (activeType.value === 'photo') {
-    emit(
-      'save',
-      selectedPhotos.value.map(({ file }) => ({
-        type: 'photo',
-        title: file.name,
-        caption: caption.value.trim(),
-        blob: file,
-        fileName: file.name,
-        mimeType: file.type || 'image/*',
-        fileSize: file.size,
-      })),
-    )
+    isProcessing.value = true
+    try {
+      const items = await Promise.all(
+        selectedPhotos.value.map(async ({ file }) => {
+          const optimizedBlob = await optimizeImage(file)
+          const thumbBlob = await generateThumbnail(optimizedBlob)
+          const rawName = file.name.replace(/\.[^.]+$/, '')
+          return {
+            type: 'photo',
+            title: file.name,
+            caption: caption.value.trim(),
+            blob: optimizedBlob,
+            thumbBlob: thumbBlob || null,
+            fileName: `${rawName}.jpg`,
+            mimeType: 'image/jpeg',
+            fileSize: optimizedBlob.size,
+          }
+        }),
+      )
+      emit('save', items)
+    } finally {
+      isProcessing.value = false
+    }
     return
   }
 
@@ -365,7 +378,8 @@ function handleSave() {
         <BaseButton
           variant="primary"
           block
-          :disabled="!canSave"
+          :disabled="!canSave || isProcessing"
+          :loading="isProcessing"
           @click="handleSave"
         >
           Save to Vault

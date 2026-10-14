@@ -512,7 +512,15 @@ async function requestDriveUrl(url, accessToken, options = {}, isRetry = false) 
   return response
 }
 
+const FOLDER_CACHE_TTL = 10 * 60 * 1000 // 10 minutes in-memory cache
+const folderIdMemCache = new Map()
+
 async function getCachedFolderId(pathKey, accessToken) {
+  const mem = folderIdMemCache.get(pathKey)
+  if (mem && (Date.now() - mem.checkedAt < FOLDER_CACHE_TTL)) {
+    return mem.id
+  }
+
   const cached = await db.driveFolders.get(pathKey)
   if (!cached?.driveFolderId) {
     return null
@@ -528,14 +536,17 @@ async function getCachedFolderId(pathKey, accessToken) {
     if (payload.trashed || !payload.id) {
       console.warn(`[ClassVault Drive] cached folder invalid: ${pathKey} (${cached.driveFolderId}) -> cache cleared`)
       await db.driveFolders.delete(pathKey)
+      folderIdMemCache.delete(pathKey)
       return null
     }
 
+    folderIdMemCache.set(pathKey, { id: payload.id, checkedAt: Date.now() })
     return payload.id
   } catch (error) {
     const message = error?.message || String(error)
     console.warn(`[ClassVault Drive] cached folder validation failed for ${pathKey} (${cached.driveFolderId}): ${message}`)
     await db.driveFolders.delete(pathKey)
+    folderIdMemCache.delete(pathKey)
     return null
   }
 }
@@ -572,6 +583,11 @@ async function createFolder(parentId, folderName, accessToken) {
 export async function ensureDriveFolderPath(rawFolderPath, accessToken) {
   const fullPath = getRootedFolderPath(rawFolderPath)
 
+  const mem = folderIdMemCache.get(fullPath)
+  if (mem && (Date.now() - mem.checkedAt < FOLDER_CACHE_TTL)) {
+    return mem.id
+  }
+
   if (inFlightFolderPaths.has(fullPath)) {
     return inFlightFolderPaths.get(fullPath)
   }
@@ -586,8 +602,8 @@ export async function ensureDriveFolderPath(rawFolderPath, accessToken) {
       const cachedId = await getCachedFolderId(currentPath, accessToken)
 
       if (cachedId) {
-        console.log(`[ClassVault Drive] using cached folder: ${currentPath} -> ${cachedId}`)
         parentId = cachedId
+        folderIdMemCache.set(currentPath, { id: cachedId, checkedAt: Date.now() })
         continue
       }
 
@@ -602,9 +618,11 @@ export async function ensureDriveFolderPath(rawFolderPath, accessToken) {
       }
 
       await db.driveFolders.put({ path: currentPath, driveFolderId: folderId })
+      folderIdMemCache.set(currentPath, { id: folderId, checkedAt: Date.now() })
       parentId = folderId
     }
 
+    folderIdMemCache.set(fullPath, { id: parentId, checkedAt: Date.now() })
     console.log(`[ClassVault Drive] resolved folder path: ${fullPath} -> ${parentId}`)
     return parentId
   })()
@@ -664,51 +682,52 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
     }
   }
 
-  // Match only this item's Drive metadata so unrelated files are never overwritten.
-  const existingQuery = `appProperties has { key='itemId' and value='${escapeDriveQuery(item.id)}' } and '${folderId}' in parents and trashed = false`
-  try {
-    const checkRes = await requestDriveUrl(
-      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(existingQuery)}&spaces=drive&fields=files(id,name)&pageSize=1`,
-      accessToken,
-    )
-    const checkPayload = await checkRes.json()
-    if (checkPayload.files?.length > 0) {
-      const existingId = checkPayload.files[0].id
-      console.log(`[ClassVault Drive] File "${safeName}" already exists in Drive (${existingId}). Updating existing file instead of creating duplicate.`)
-      // Update existing file's media to prevent duplicate files
-      let updateRes = await fetch(
-        `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media&fields=id,name,modifiedTime`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': contentType,
-          },
-          body: payloadBlob,
-        },
+  // For previously attempted items (retries) or existing driveFileId, verify if already present in Drive
+  if (item.driveFileId || (item.retryCount && item.retryCount > 0)) {
+    const existingQuery = `appProperties has { key='itemId' and value='${escapeDriveQuery(item.id)}' } and '${folderId}' in parents and trashed = false`
+    try {
+      const checkRes = await requestDriveUrl(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(existingQuery)}&spaces=drive&fields=files(id,name)&pageSize=1`,
+        accessToken,
       )
-      if (updateRes.status === 401 && typeof navigator !== 'undefined' && navigator.onLine) {
-        const refreshed = await refreshAccessTokenSilently()
-        if (refreshed.ok && refreshed.accessToken) {
-          updateRes = await fetch(
-            `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media&fields=id,name,modifiedTime`,
-            {
-              method: 'PATCH',
-              headers: {
-                Authorization: `Bearer ${refreshed.accessToken}`,
-                'Content-Type': contentType,
-              },
-              body: payloadBlob,
+      const checkPayload = await checkRes.json()
+      if (checkPayload.files?.length > 0) {
+        const existingId = checkPayload.files[0].id
+        console.log(`[ClassVault Drive] File "${safeName}" already exists in Drive (${existingId}). Updating existing file instead of creating duplicate.`)
+        let updateRes = await fetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media&fields=id,name,modifiedTime`,
+          {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': contentType,
             },
-          )
+            body: payloadBlob,
+          },
+        )
+        if (updateRes.status === 401 && typeof navigator !== 'undefined' && navigator.onLine) {
+          const refreshed = await refreshAccessTokenSilently()
+          if (refreshed.ok && refreshed.accessToken) {
+            updateRes = await fetch(
+              `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media&fields=id,name,modifiedTime`,
+              {
+                method: 'PATCH',
+                headers: {
+                  Authorization: `Bearer ${refreshed.accessToken}`,
+                  'Content-Type': contentType,
+                },
+                body: payloadBlob,
+              },
+            )
+          }
+        }
+        if (updateRes.ok) {
+          return { ...(await updateRes.json()), updated: true }
         }
       }
-      if (updateRes.ok) {
-        return { ...(await updateRes.json()), updated: true }
-      }
+    } catch (err) {
+      console.warn(`[ClassVault Drive] Could not check for an existing Drive upload: ${err.message || err}`)
     }
-  } catch (err) {
-    throw new Error(`Could not check for an existing Drive upload: ${err.message || err}`)
   }
 
   metadata.parents = [folderId]

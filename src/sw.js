@@ -33,7 +33,7 @@ async function runBackgroundSync() {
   }
 
   if (!token.accessToken || !token.expiresAt || Date.now() >= token.expiresAt) {
-    await db.settings.delete('classvault.driveAccessToken')
+    // Token is expired for background sync. Do not delete it; foreground app will silently renew it on open.
     return
   }
 

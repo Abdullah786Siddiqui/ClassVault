@@ -2,8 +2,9 @@ import db from './db'
 
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const ROOT_FOLDER_NAME = 'ClassVault'
-const SESSION_TOKEN_KEY = 'classvault.driveAccessToken'
+const STORAGE_TOKEN_KEY = 'classvault.driveAccessToken'
 const DRIVE_TOKEN_SETTING = 'classvault.driveAccessToken'
+const STORAGE_EMAIL_KEY = 'classvault.userEmail'
 const inFlightFolderPaths = new Map()
 
 const tokenState = {
@@ -11,8 +12,46 @@ const tokenState = {
   expiresAt: 0,
 }
 
+let refreshTimer = null
+const tokenListeners = new Set()
+
+export function onTokenRefreshed(callback) {
+  tokenListeners.add(callback)
+  return () => tokenListeners.delete(callback)
+}
+
+function notifyTokenListeners(data) {
+  tokenListeners.forEach((cb) => {
+    try {
+      cb(data)
+    } catch (e) {
+      console.warn('[ClassVault Drive] Error in token listener:', e)
+    }
+  })
+}
+
 function getClientId() {
   return import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+}
+
+export function getStoredUserEmail() {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(STORAGE_EMAIL_KEY) || window.sessionStorage.getItem(STORAGE_EMAIL_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export async function setStoredUserEmail(email) {
+  if (!email || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(STORAGE_EMAIL_KEY, email)
+    window.sessionStorage.setItem(STORAGE_EMAIL_KEY, email)
+  } catch {}
+  try {
+    await db.settings.put({ key: STORAGE_EMAIL_KEY, value: email })
+  } catch {}
 }
 
 export async function resetDriveFolderCache() {
@@ -65,49 +104,128 @@ export function googleClientIdConfigured() {
   return Boolean(getClientId())
 }
 
-function restoreSessionAccessToken() {
-  if (typeof window === 'undefined') return ''
+export function scheduleTokenRefresh(expiresAt) {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
 
-  try {
-    const stored = window.sessionStorage.getItem(SESSION_TOKEN_KEY)
-    if (!stored) return ''
+  if (!expiresAt || typeof window === 'undefined') return
 
-    const token = JSON.parse(stored)
-    if (
-      typeof token.accessToken !== 'string' ||
-      !token.accessToken ||
-      typeof token.expiresAt !== 'number' ||
-      Date.now() >= token.expiresAt
-    ) {
-      window.sessionStorage.removeItem(SESSION_TOKEN_KEY)
-      return ''
-    }
+  // Schedule refresh 5 minutes before token expires
+  const leadTimeMs = 5 * 60 * 1000
+  const delay = Math.max(expiresAt - Date.now() - leadTimeMs, 10000)
 
-    tokenState.accessToken = token.accessToken
-    tokenState.expiresAt = token.expiresAt
-    return tokenState.accessToken
-  } catch (error) {
-    console.warn('[ClassVault Drive] Could not restore the session token:', error)
-    return ''
+  if (delay > 0 && delay < 2 * 60 * 60 * 1000) {
+    refreshTimer = setTimeout(async () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        console.log('[ClassVault Drive] Auto-refreshing token before expiry...')
+        try {
+          await refreshAccessTokenSilently()
+        } catch (e) {
+          console.warn('[ClassVault Drive] Auto-refresh failed:', e)
+        }
+      }
+    }, delay)
   }
 }
 
-async function persistSessionAccessToken() {
-  const storedToken = JSON.stringify({
-    accessToken: tokenState.accessToken,
-    expiresAt: tokenState.expiresAt,
-  })
+export function restoreStoredAccessToken() {
+  if (typeof window === 'undefined') return ''
+
+  // 1. In-memory check
+  if (tokenState.accessToken && Date.now() < tokenState.expiresAt) {
+    return tokenState.accessToken
+  }
+
+  // 2. localStorage check (persists across tab closes, browser restarts and PWA launches)
   try {
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(SESSION_TOKEN_KEY, storedToken)
+    const rawLocal = window.localStorage.getItem(STORAGE_TOKEN_KEY)
+    if (rawLocal) {
+      const parsed = JSON.parse(rawLocal)
+      if (
+        typeof parsed.accessToken === 'string' &&
+        parsed.accessToken &&
+        typeof parsed.expiresAt === 'number' &&
+        Date.now() < parsed.expiresAt
+      ) {
+        tokenState.accessToken = parsed.accessToken
+        tokenState.expiresAt = parsed.expiresAt
+        scheduleTokenRefresh(parsed.expiresAt)
+        return tokenState.accessToken
+      }
     }
   } catch (error) {
-    console.warn('[ClassVault Drive] Could not persist the session token:', error)
+    console.warn('[ClassVault Drive] Could not restore token from localStorage:', error)
   }
+
+  // 3. sessionStorage check
   try {
-    await db.settings.put({ key: DRIVE_TOKEN_SETTING, value: storedToken })
+    const rawSession = window.sessionStorage.getItem(STORAGE_TOKEN_KEY)
+    if (rawSession) {
+      const parsed = JSON.parse(rawSession)
+      if (
+        typeof parsed.accessToken === 'string' &&
+        parsed.accessToken &&
+        typeof parsed.expiresAt === 'number' &&
+        Date.now() < parsed.expiresAt
+      ) {
+        tokenState.accessToken = parsed.accessToken
+        tokenState.expiresAt = parsed.expiresAt
+        scheduleTokenRefresh(parsed.expiresAt)
+        return tokenState.accessToken
+      }
+    }
   } catch (error) {
-    console.warn('[ClassVault Drive] Could not make the token available to background sync:', error)
+    console.warn('[ClassVault Drive] Could not restore token from sessionStorage:', error)
+  }
+
+  tokenState.accessToken = ''
+  tokenState.expiresAt = 0
+  return ''
+}
+
+export async function persistAccessToken(accessToken, expiresAt) {
+  tokenState.accessToken = accessToken
+  tokenState.expiresAt = expiresAt
+
+  const payload = JSON.stringify({ accessToken, expiresAt })
+
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(STORAGE_TOKEN_KEY, payload)
+    } catch (e) {
+      console.warn('[ClassVault Drive] localStorage set failed:', e)
+    }
+    try {
+      window.sessionStorage.setItem(STORAGE_TOKEN_KEY, payload)
+    } catch (e) {
+      console.warn('[ClassVault Drive] sessionStorage set failed:', e)
+    }
+  }
+
+  try {
+    await db.settings.put({ key: DRIVE_TOKEN_SETTING, value: payload })
+  } catch (e) {
+    console.warn('[ClassVault Drive] IndexedDB token save failed:', e)
+  }
+
+  scheduleTokenRefresh(expiresAt)
+  notifyTokenListeners({ accessToken, expiresAt })
+
+  // Asynchronously query and store user email to use as login_hint for silent renewals
+  fetchAndStoreUserEmail(accessToken).catch(() => undefined)
+}
+
+async function fetchAndStoreUserEmail(accessToken) {
+  try {
+    const about = await getDriveAbout(accessToken)
+    const email = about?.user?.emailAddress
+    if (email) {
+      await setStoredUserEmail(email)
+    }
+  } catch (e) {
+    console.warn('[ClassVault Drive] Could not fetch user email for login hint:', e)
   }
 }
 
@@ -165,7 +283,7 @@ export async function ensureGoogleAvailable() {
   }
 }
 
-export async function requestDriveAccessToken({ forcePrompt = false } = {}) {
+export async function requestDriveAccessToken({ prompt, forcePrompt = false, loginHint } = {}) {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return { ok: false, message: 'Google Drive is unavailable while you are offline.' }
   }
@@ -175,61 +293,108 @@ export async function requestDriveAccessToken({ forcePrompt = false } = {}) {
     return ready
   }
 
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return { ok: false, message: 'Google Drive is unavailable while you are offline.' }
+  const clientId = getClientId()
+  const emailHint = loginHint || getStoredUserEmail()
+
+  let promptValue = ''
+  if (prompt !== undefined) {
+    promptValue = prompt
+  } else if (forcePrompt) {
+    promptValue = 'consent'
   }
 
-  const clientId = getClientId()
-
   return new Promise((resolve) => {
+    let settled = false
+    let timeoutId = null
+
+    // For silent requests ('none'), set a 10s safety timeout in case the response doesn't arrive
+    if (promptValue === 'none') {
+      timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true
+          resolve({ ok: false, error: 'timeout', message: 'Silent token renewal timed out.' })
+        }
+      }, 10000)
+    }
+
     const tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: GOOGLE_DRIVE_SCOPE,
       callback: async (response) => {
+        if (settled) return
+        settled = true
+        if (timeoutId) clearTimeout(timeoutId)
+
         if (response.error) {
-          resolve({ ok: false, message: response.error_description || response.error || 'Google sign-in failed.' })
+          resolve({
+            ok: false,
+            error: response.error,
+            message: response.error_description || response.error || 'Google sign-in failed.',
+          })
           return
         }
 
-        tokenState.accessToken = response.access_token
-        tokenState.expiresAt = Date.now() + Math.max((response.expires_in || 3600) - 30, 60) * 1000
-        await persistSessionAccessToken()
+        const expiresAt = Date.now() + Math.max((response.expires_in || 3600) - 30, 60) * 1000
+        await persistAccessToken(response.access_token, expiresAt)
 
-        resolve({ ok: true, accessToken: response.access_token, expiresAt: tokenState.expiresAt })
+        resolve({ ok: true, accessToken: response.access_token, expiresAt })
       },
       error_callback: (error) => {
-        resolve({ ok: false, message: error?.message || 'Failed to get a Google Drive token.' })
+        if (settled) return
+        settled = true
+        if (timeoutId) clearTimeout(timeoutId)
+        resolve({
+          ok: false,
+          error: error?.type || 'error',
+          message: error?.message || 'Failed to get a Google Drive token.',
+        })
       },
     })
 
-    tokenClient.requestAccessToken({ prompt: forcePrompt ? 'consent' : '' })
+    const requestOptions = {
+      prompt: promptValue,
+      ...(emailHint ? { login_hint: emailHint } : {}),
+    }
+
+    try {
+      tokenClient.requestAccessToken(requestOptions)
+    } catch (err) {
+      if (settled) return
+      settled = true
+      if (timeoutId) clearTimeout(timeoutId)
+      resolve({ ok: false, error: err?.name, message: err?.message || 'Error requesting token.' })
+    }
   })
 }
 
-export function getStoredAccessToken() {
-  if (tokenState.accessToken && Date.now() < tokenState.expiresAt) {
-    return tokenState.accessToken
+export async function refreshAccessTokenSilently() {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { ok: false, message: 'Google Drive is unavailable while you are offline.' }
   }
-
-  tokenState.accessToken = ''
-  tokenState.expiresAt = 0
-  return restoreSessionAccessToken()
+  const email = getStoredUserEmail()
+  return requestDriveAccessToken({ prompt: 'none', loginHint: email })
 }
 
-export async function getDriveAccessToken({ forceRefresh = false } = {}) {
+export function getStoredAccessToken() {
+  return restoreStoredAccessToken()
+}
+
+export async function getDriveAccessToken({ forceRefresh = false, silentOnly = false } = {}) {
   if (forceRefresh) {
-    const result = await requestDriveAccessToken({ forcePrompt: true })
+    const result = await requestDriveAccessToken({ prompt: '' })
     return result.ok
       ? { ok: true, accessToken: result.accessToken }
       : { ok: false, message: result.message }
   }
 
+  // 1. Check synchronous storage (memory, localStorage, sessionStorage)
   const accessToken = getStoredAccessToken()
   if (accessToken) return { ok: true, accessToken }
 
-  const stored = await db.settings.get(DRIVE_TOKEN_SETTING)
-  if (stored?.value) {
-    try {
+  // 2. Fallback check to IndexedDB
+  try {
+    const stored = await db.settings.get(DRIVE_TOKEN_SETTING)
+    if (stored?.value) {
       const token = JSON.parse(stored.value)
       if (
         typeof token.accessToken === 'string' &&
@@ -237,14 +402,29 @@ export async function getDriveAccessToken({ forceRefresh = false } = {}) {
         typeof token.expiresAt === 'number' &&
         Date.now() < token.expiresAt
       ) {
-        tokenState.accessToken = token.accessToken
-        tokenState.expiresAt = token.expiresAt
-        return { ok: true, accessToken: tokenState.accessToken }
+        await persistAccessToken(token.accessToken, token.expiresAt)
+        return { ok: true, accessToken: token.accessToken }
       }
-    } catch (error) {
-      console.warn('[ClassVault Drive] Could not read the background sync token:', error)
     }
-    await db.settings.delete(DRIVE_TOKEN_SETTING)
+  } catch (error) {
+    console.warn('[ClassVault Drive] Could not read background sync token:', error)
+  }
+
+  // 3. If online and student has previously connected, attempt silent renewal!
+  if (typeof navigator !== 'undefined' && navigator.onLine) {
+    const connectedSetting = await db.settings.get('hasConnectedGoogle')
+    const previouslyConnected = connectedSetting?.value === 'true'
+    if (previouslyConnected) {
+      console.log('[ClassVault Drive] Token expired or not in memory. Attempting silent renewal...')
+      const silentResult = await refreshAccessTokenSilently()
+      if (silentResult.ok) {
+        return { ok: true, accessToken: silentResult.accessToken }
+      }
+    }
+  }
+
+  if (silentOnly) {
+    return { ok: false, message: 'Silent refresh not possible.' }
   }
 
   return {
@@ -272,15 +452,25 @@ function getRootedFolderPath(value) {
   return `${ROOT_FOLDER_NAME}/${normalized}`
 }
 
-async function requestDriveUrl(url, accessToken, options = {}) {
+async function requestDriveUrl(url, accessToken, options = {}, isRetry = false) {
+  let token = accessToken || getStoredAccessToken()
   const response = await fetch(url, {
     ...options,
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${token}`,
       Accept: 'application/json',
       ...(options.headers || {}),
     },
   })
+
+  // Self-heal on 401 Unauthorized: silently refresh token and retry once
+  if (response.status === 401 && !isRetry && typeof navigator !== 'undefined' && navigator.onLine) {
+    console.warn('[ClassVault Drive] 401 received. Attempting silent token refresh and retry...')
+    const refreshed = await refreshAccessTokenSilently()
+    if (refreshed.ok && refreshed.accessToken) {
+      return requestDriveUrl(url, refreshed.accessToken, options, true)
+    }
+  }
 
   if (!response.ok) {
     const text = await response.text()
@@ -454,7 +644,7 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
       const existingId = checkPayload.files[0].id
       console.log(`[ClassVault Drive] File "${safeName}" already exists in Drive (${existingId}). Updating existing file instead of creating duplicate.`)
       // Update existing file's media to prevent duplicate files
-      const updateRes = await fetch(
+      let updateRes = await fetch(
         `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media&fields=id,name,modifiedTime`,
         {
           method: 'PATCH',
@@ -465,6 +655,22 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
           body: payloadBlob,
         },
       )
+      if (updateRes.status === 401 && typeof navigator !== 'undefined' && navigator.onLine) {
+        const refreshed = await refreshAccessTokenSilently()
+        if (refreshed.ok && refreshed.accessToken) {
+          updateRes = await fetch(
+            `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media&fields=id,name,modifiedTime`,
+            {
+              method: 'PATCH',
+              headers: {
+                Authorization: `Bearer ${refreshed.accessToken}`,
+                'Content-Type': contentType,
+              },
+              body: payloadBlob,
+            },
+          )
+        }
+      }
       if (updateRes.ok) {
         return { ...(await updateRes.json()), updated: true }
       }
@@ -482,16 +688,34 @@ export async function uploadItemToDrive({ item, folderPath, accessToken }) {
   )
   formData.append('file', payloadBlob)
 
-  const response = await fetch(
+  let uploadToken = accessToken
+  let response = await fetch(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,modifiedTime',
     {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${uploadToken}`,
       },
       body: formData,
     },
   )
+
+  if (response.status === 401 && typeof navigator !== 'undefined' && navigator.onLine) {
+    const refreshed = await refreshAccessTokenSilently()
+    if (refreshed.ok && refreshed.accessToken) {
+      uploadToken = refreshed.accessToken
+      response = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,modifiedTime',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${uploadToken}`,
+          },
+          body: formData,
+        },
+      )
+    }
+  }
 
   if (!response.ok) {
     const text = await response.text()
@@ -509,14 +733,30 @@ export async function downloadDriveFile(driveFileId, accessToken) {
     throw new Error('Missing Drive file ID')
   }
 
-  const response = await fetch(
+  let token = accessToken
+  let response = await fetch(
     `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`,
     {
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${token}`,
       },
     },
   )
+
+  if (response.status === 401 && typeof navigator !== 'undefined' && navigator.onLine) {
+    const refreshed = await refreshAccessTokenSilently()
+    if (refreshed.ok && refreshed.accessToken) {
+      token = refreshed.accessToken
+      response = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      )
+    }
+  }
 
   if (!response.ok) {
     const text = await response.text()
@@ -538,15 +778,33 @@ export async function deleteDriveFile(driveFileId, accessToken) {
     throw new Error('Connect to the internet before deleting this Drive item.')
   }
   try {
-    const response = await fetch(
+    let token = accessToken
+    let response = await fetch(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}`,
       {
         method: 'DELETE',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${token}`,
         },
       },
     )
+
+    if (response.status === 401 && typeof navigator !== 'undefined' && navigator.onLine) {
+      const refreshed = await refreshAccessTokenSilently()
+      if (refreshed.ok && refreshed.accessToken) {
+        token = refreshed.accessToken
+        response = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}`,
+          {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        )
+      }
+    }
+
     if (response.ok || response.status === 404) {
       console.log(`[ClassVault Drive] Successfully deleted ${driveFileId} from Google Drive`)
     } else {
@@ -637,4 +895,25 @@ export async function listDriveFiles(accessToken) {
   }
 
   return files
+}
+
+// Automatically check and refresh token on tab visibility and network restore
+if (typeof window !== 'undefined') {
+  const checkTokenExpiryAndRenew = () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      if (tokenState.accessToken && Date.now() >= tokenState.expiresAt - 5 * 60 * 1000) {
+        refreshAccessTokenSilently().catch(() => undefined)
+      } else if (!tokenState.accessToken) {
+        restoreStoredAccessToken()
+      }
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkTokenExpiryAndRenew()
+    }
+  })
+
+  window.addEventListener('online', checkTokenExpiryAndRenew)
 }

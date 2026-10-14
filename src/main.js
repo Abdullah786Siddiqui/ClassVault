@@ -34,10 +34,11 @@ listenForBackgroundSync(async () => {
   }
 })
 
-// Listen for network reconnect to trigger auto-sync (Fixes B4)
+// Listen for network reconnect to trigger token refresh & auto-sync (Fixes B4)
 window.addEventListener('online', async () => {
   const syncStore = useSyncStore(pinia)
   await syncStore.refreshCounts()
+  await authStore.checkAndRefreshToken()
   if (authStore.signedIn) {
     await syncStore.syncNow()
   }
@@ -45,9 +46,13 @@ window.addEventListener('online', async () => {
 
 // Refresh the local Drive mirror when returning to the app after Drive changes.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && navigator.onLine && authStore.signedIn) {
-    useSyncStore(pinia).syncNow().catch((error) => {
-      console.error('[ClassVault] Failed to refresh the Drive mirror:', error)
+  if (document.visibilityState === 'visible' && navigator.onLine) {
+    authStore.checkAndRefreshToken().then(() => {
+      if (authStore.signedIn) {
+        useSyncStore(pinia).syncNow().catch((error) => {
+          console.error('[ClassVault] Failed to refresh the Drive mirror:', error)
+        })
+      }
     })
   }
 })

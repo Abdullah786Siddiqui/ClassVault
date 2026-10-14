@@ -32,6 +32,9 @@ const failedCount = computed(() => syncStore.failedCount)
 
 // Show whether local changes still need to be uploaded.
 const statusTitle = computed(() => {
+  if (authStore.reconnecting) {
+    return 'Connecting to Google Drive...'
+  }
   if (!authStore.signedIn) {
     return authStore.hasConnectedBefore ? 'Reconnect to Google Drive' : 'Google Drive Not Connected'
   }
@@ -58,6 +61,9 @@ const statusTitle = computed(() => {
 
 // Subtitle: clear offline description
 const statusSubtitle = computed(() => {
+  if (authStore.reconnecting) {
+    return 'Verifying your Google Drive session...'
+  }
   if (!authStore.signedIn) {
     if (authStore.hasConnectedBefore) {
       return `${pendingCount.value} ${pendingCount.value === 1 ? 'item' : 'items'} saved on this device · Reconnect Drive to sync`

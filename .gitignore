@@ -26,3 +26,10 @@ dev-dist
 *.njsproj
 *.sln
 *.sw?
+
+# WhatsApp Bot session & downloads
+whatsapp-bot/auth_session
+whatsapp-bot/downloads
+whatsapp-bot/token.json
+whatsapp-bot/credentials.json
+whatsapp-bot/node_modules

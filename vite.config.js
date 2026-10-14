@@ -60,5 +60,14 @@ export default defineConfig(({ mode }) => {
         },
       }),
     ],
+    server: {
+      proxy: {
+        '/api/whatsapp': {
+          target: 'http://localhost:4848',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/whatsapp/, '/api'),
+        },
+      },
+    },
   }
 })

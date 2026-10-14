@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useTheme } from '../../composables/useTheme'
 import { useToast } from '../../composables/useToast'
 import { useAuthStore } from '../../stores/auth'
@@ -10,6 +10,7 @@ import { requestNotificationPermission } from '../../services/notifications'
 import ToastHost from '../ui/ToastHost.vue'
 import BaseButton from '../ui/BaseButton.vue'
 import { BookOpen, Download } from '../ui/icons.js'
+import WhatsAppSyncModal from '../domain/WhatsAppSyncModal.vue'
 
 defineProps({
   isInstallable: {
@@ -23,6 +24,7 @@ const toast = useToast()
 const authStore = useAuthStore()
 const syncStore = useSyncStore()
 const { isDark, toggleTheme, initTheme } = useTheme()
+const isWhatsAppModalOpen = ref(false)
 
 const pendingCount = computed(() => syncStore.pendingCount)
 
@@ -201,6 +203,16 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
             </span>
           </button>
 
+          <!-- WhatsApp Vault Sync Button -->
+          <button
+            class="icon-btn whatsapp-btn-action"
+            aria-label="WhatsApp Vault Sync"
+            title="WhatsApp Group Sync & In-App QR"
+            @click="isWhatsAppModalOpen = true"
+          >
+            <i class="fa-brands fa-whatsapp text-emerald-500 text-base" aria-hidden="true"></i>
+          </button>
+
           <button
             v-if="isInstallable"
             class="install-button"
@@ -243,6 +255,10 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
         </div>
         <span>Sync</span>
       </button>
+      <button class="mobile-nav-link" title="WhatsApp Sync" @click="isWhatsAppModalOpen = true">
+        <i class="fa-brands fa-whatsapp text-emerald-500" aria-hidden="true"></i>
+        <span>WhatsApp</span>
+      </button>
       <button class="mobile-nav-link" @click="toggleTheme()">
         <i :class="isDark ? 'fa-solid fa-sun' : 'fa-solid fa-moon'" aria-hidden="true"></i>
         <span>{{ isDark ? 'Light' : 'Dark' }}</span>
@@ -252,6 +268,9 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
         <span>Install</span>
       </button>
     </nav>
+
+    <!-- WhatsApp Sync Modal -->
+    <WhatsAppSyncModal :open="isWhatsAppModalOpen" @close="isWhatsAppModalOpen = false" />
   </div>
 </template>
 
@@ -521,6 +540,11 @@ html.dark .nav-tab.is-active {
   border-color: var(--color-brand-400);
   color: var(--color-brand-700);
   background: var(--color-brand-50);
+}
+.whatsapp-btn-action:hover {
+  border-color: #10b981 !important;
+  color: #10b981 !important;
+  background: rgba(16, 185, 129, 0.12) !important;
 }
 html.dark .icon-btn:hover {
   color: #c4b5fd;

@@ -1,0 +1,24 @@
+{
+  "mappings": [
+    {
+      "groupName": "Calculus 101",
+      "semester": "Semester 1",
+      "exam": "Midterm",
+      "subject": "Calculus"
+    },
+    {
+      "groupName": "Operating Systems",
+      "semester": "Semester 1",
+      "exam": "Midterm",
+      "subject": "Operating Systems"
+    },
+    {
+      "groupName": "Data Structures",
+      "semester": "Semester 1",
+      "exam": "Midterm",
+      "subject": "Data Structures"
+    }
+  ],
+  "saveLocalBackup": true,
+  "localBackupDir": "./downloads"
+}

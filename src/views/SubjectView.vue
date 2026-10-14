@@ -120,14 +120,7 @@ async function handleSaveItem(payload) {
         toast.error(result.reason || result.mirrorError || 'Could not sync the saved item.')
       }
     } else if (!navigator.onLine && authStore.signedIn) {
-      const scheduled = await registerBackgroundSync()
-      toast.info(
-        scheduled
-          ? 'Background upload is scheduled. It will run when your connection returns if this browser supports it.'
-          : 'Saved locally. Open ClassVault while online to upload on this browser.',
-      )
-    } else {
-      toast.info('Saved locally. Connect Google Drive to upload this item.')
+      registerBackgroundSync().catch(() => undefined)
     }
   } catch (err) {
     toast.error(err?.message || 'Failed to save item to Vault')

@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { useSemesterStore } from '../stores/semesters'
 import { useAuthStore } from '../stores/auth'
 import { useToast } from '../composables/useToast'
-import SyncBanner from '../components/layout/SyncBanner.vue'
 import SemesterCard from '../components/domain/SemesterCard.vue'
 import BottomSheet from '../components/ui/BottomSheet.vue'
 import BaseButton from '../components/ui/BaseButton.vue'
@@ -102,9 +101,6 @@ async function confirmDeleteSemester() {
         <span class="welcome-spark welcome-spark-two"></span>
       </div>
     </section>
-
-    <!-- Sync Banner -->
-    <SyncBanner />
 
     <!-- Semesters Section Header & Search -->
     <div class="library-section-heading flex-col gap-3 sm:flex-row sm:items-center">

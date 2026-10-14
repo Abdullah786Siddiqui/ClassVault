@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia'
+import db from '../services/db'
 import {
   connectGoogleDrive,
   hasPreviouslyConnected,
 } from '../services/auth'
 import {
   getStoredAccessToken,
+  persistAccessToken,
   refreshAccessTokenSilently,
   onTokenRefreshed,
 } from '../services/drive'
@@ -49,8 +51,31 @@ export const useAuthStore = defineStore('auth', {
         }
       })
 
-      // 1. Check if we already have an unexpired token in localStorage or sessionStorage
-      const currentToken = getStoredAccessToken()
+      // 1. Check if we already have an unexpired token in memory or localStorage
+      let currentToken = getStoredAccessToken()
+
+      // 1b. IndexedDB fallback: on mobile standalone PWAs, localStorage can be partitioned or slow,
+      // but IndexedDB reliably persists across app closes / swipe-aways
+      if (!currentToken) {
+        try {
+          const stored = await db.settings.get('classvault.driveAccessToken')
+          if (stored?.value) {
+            const parsed = JSON.parse(stored.value)
+            if (
+              typeof parsed.accessToken === 'string' &&
+              parsed.accessToken &&
+              typeof parsed.expiresAt === 'number' &&
+              Date.now() < parsed.expiresAt
+            ) {
+              currentToken = parsed.accessToken
+              await persistAccessToken(parsed.accessToken, parsed.expiresAt)
+            }
+          }
+        } catch (e) {
+          console.warn('[ClassVault Auth] IndexedDB token check failed:', e)
+        }
+      }
+
       if (currentToken) {
         this.signedIn = true
         this.status = navigator.onLine ? 'Google Drive ready' : 'Offline'
@@ -75,7 +100,7 @@ export const useAuthStore = defineStore('auth', {
       }
 
       // 4. User previously connected! Attempt silent background token renewal without showing popups
-      this.status = 'Connecting Google Drive...'
+      this.status = 'Checking Google Drive...'
       try {
         const silentResult = await refreshAccessTokenSilently()
         if (silentResult.ok) {
@@ -90,9 +115,9 @@ export const useAuthStore = defineStore('auth', {
         console.warn('[ClassVault Auth] Silent background renewal failed on startup:', err)
       }
 
-      // 5. Silent renewal was not possible (e.g. Google session expired or cookies blocked)
+      // 5. Silent renewal was not possible (token expired and requires interactive user tap on sync button)
       this.signedIn = false
-      this.status = 'Reconnect required'
+      this.status = 'Offline Ready'
     },
 
     async connectGoogle() {

@@ -185,6 +185,38 @@ export function restoreStoredAccessToken() {
   return ''
 }
 
+export async function restoreStoredAccessTokenAsync() {
+  const syncToken = restoreStoredAccessToken()
+  if (syncToken) return syncToken
+
+  try {
+    const stored = await db.settings.get(DRIVE_TOKEN_SETTING)
+    if (stored?.value) {
+      const parsed = JSON.parse(stored.value)
+      if (
+        typeof parsed.accessToken === 'string' &&
+        parsed.accessToken &&
+        typeof parsed.expiresAt === 'number' &&
+        Date.now() < parsed.expiresAt
+      ) {
+        tokenState.accessToken = parsed.accessToken
+        tokenState.expiresAt = parsed.expiresAt
+        try {
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(STORAGE_TOKEN_KEY, stored.value)
+          }
+        } catch {}
+        scheduleTokenRefresh(parsed.expiresAt)
+        return tokenState.accessToken
+      }
+    }
+  } catch (error) {
+    console.warn('[ClassVault Drive] Could not restore token from db.settings:', error)
+  }
+
+  return ''
+}
+
 export async function persistAccessToken(accessToken, expiresAt) {
   tokenState.accessToken = accessToken
   tokenState.expiresAt = expiresAt

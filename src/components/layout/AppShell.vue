@@ -1,8 +1,9 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, computed } from 'vue'
 import { useTheme } from '../../composables/useTheme'
 import { useToast } from '../../composables/useToast'
 import { useAuthStore } from '../../stores/auth'
+import { useSyncStore } from '../../stores/sync'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 import ToastHost from '../ui/ToastHost.vue'
 import BaseButton from '../ui/BaseButton.vue'
@@ -18,10 +19,95 @@ defineProps({
 const emit = defineEmits(['install'])
 const toast = useToast()
 const authStore = useAuthStore()
+const syncStore = useSyncStore()
 const { isDark, toggleTheme, initTheme } = useTheme()
 
-onMounted(() => {
+const pendingCount = computed(() => syncStore.pendingCount)
+
+const syncIconClass = computed(() => {
+  if (syncStore.isSyncing) return 'fa-solid fa-arrows-rotate fa-spin'
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return 'fa-solid fa-cloud-slash'
+  if (pendingCount.value > 0) return 'fa-solid fa-cloud-arrow-up'
+  if (authStore.signedIn) return 'fa-solid fa-cloud-check'
+  return 'fa-solid fa-cloud'
+})
+
+const syncTooltip = computed(() => {
+  if (syncStore.isSyncing) return 'Syncing to Google Drive...'
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return `${pendingCount.value} item(s) saved on this device (offline)`
+  }
+  if (!authStore.signedIn) {
+    return pendingCount.value > 0
+      ? `${pendingCount.value} items saved on device · Tap to sync with Drive`
+      : 'Connect Google Drive'
+  }
+  if (pendingCount.value > 0) {
+    return `${pendingCount.value} items waiting to sync · Tap to sync now`
+  }
+  return 'All notes & files are synced to Google Drive'
+})
+
+const syncStatusLabel = computed(() => {
+  if (syncStore.isSyncing) return 'Syncing...'
+  if (authStore.signedIn) return 'Drive Connected'
+  if (pendingCount.value > 0) return `${pendingCount.value} On Device`
+  return 'Offline Ready'
+})
+
+async function handleSyncClick() {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    toast.info(
+      pendingCount.value > 0
+        ? `${pendingCount.value} item(s) saved safely on device. Will sync when online.`
+        : 'You are offline. Notes & photos are safely saved on this device.',
+    )
+    return
+  }
+
+  if (!authStore.signedIn) {
+    toast.info('Connecting to Google Drive...')
+    const result = await authStore.connectGoogle()
+    if (result.ok) {
+      toast.success('Google Drive connected!')
+    } else {
+      toast.error(result.message || 'Could not connect Google Drive')
+    }
+    return
+  }
+
+  try {
+    toast.info(pendingCount.value > 0 ? `Syncing ${pendingCount.value} item(s) to Drive...` : 'Checking Google Drive...')
+    const result = await syncStore.syncNow()
+    if (result.ok) {
+      toast.success(
+        result.uploaded
+          ? `Synced ${result.uploaded} item${result.uploaded > 1 ? 's' : ''} to Google Drive!`
+          : 'All items are already in Google Drive.',
+      )
+    } else {
+      toast.error(result.reason || 'Sync failed')
+    }
+  } catch (err) {
+    toast.error(err?.message || 'Error during sync')
+  }
+}
+
+onMounted(async () => {
   initTheme()
+  try {
+    await syncStore.refreshCounts()
+    // When the app opens, if any items are on phone but not synced yet, notify cleanly with a toast!
+    if (syncStore.pendingCount > 0) {
+      if (typeof navigator !== 'undefined' && navigator.onLine && authStore.signedIn) {
+        toast.info(`${syncStore.pendingCount} offline item${syncStore.pendingCount > 1 ? 's' : ''} syncing to Drive...`)
+      } else {
+        toast.info(`${syncStore.pendingCount} item${syncStore.pendingCount > 1 ? 's' : ''} saved on this device (offline).`)
+      }
+    }
+  } catch (e) {
+    console.warn('[ClassVault] App mount check failed:', e)
+  }
 })
 
 // SW update detection
@@ -76,18 +162,44 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
         <!-- Center Status Badge -->
         <div class="navbar-center">
           <div
-            class="status-pill"
-            :title="authStore.signedIn ? 'Connected to Google Drive' : 'Ready to work offline'"
+            class="status-pill cursor-pointer select-none"
+            :title="syncTooltip"
+            @click="handleSyncClick"
           >
-            <span class="status-dot"></span>
+            <span
+              class="status-dot"
+              :class="{
+                'is-active': authStore.signedIn,
+                'is-pending': pendingCount > 0 && !authStore.signedIn,
+                'is-syncing': syncStore.isSyncing,
+              }"
+            ></span>
             <span class="status-pill-text">
-              {{ authStore.signedIn ? 'Drive Connected' : authStore.hasConnectedBefore ? 'Reconnect Drive' : 'Offline Ready' }}
+              {{ syncStatusLabel }}
             </span>
           </div>
         </div>
 
         <!-- Right Header Actions -->
         <div class="app-header-actions">
+          <!-- Small Sync Button -->
+          <button
+            class="icon-btn sync-btn-action"
+            :class="{
+              'is-syncing': syncStore.isSyncing,
+              'has-pending': pendingCount > 0,
+              'is-connected': authStore.signedIn,
+            }"
+            :aria-label="syncTooltip"
+            :title="syncTooltip"
+            @click="handleSyncClick"
+          >
+            <i :class="syncIconClass" aria-hidden="true"></i>
+            <span v-if="pendingCount > 0" class="sync-badge-pill">
+              {{ pendingCount }}
+            </span>
+          </button>
+
           <button
             v-if="isInstallable"
             class="install-button"
@@ -121,6 +233,15 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
         <i class="fa-solid fa-book-open" aria-hidden="true"></i>
         <span>Library</span>
       </router-link>
+      <button class="mobile-nav-link" :title="syncTooltip" @click="handleSyncClick">
+        <div class="relative inline-flex items-center justify-center">
+          <i :class="syncIconClass" aria-hidden="true"></i>
+          <span v-if="pendingCount > 0" class="mobile-sync-badge">
+            {{ pendingCount }}
+          </span>
+        </div>
+        <span>Sync</span>
+      </button>
       <button class="mobile-nav-link" @click="toggleTheme()">
         <i :class="isDark ? 'fa-solid fa-sun' : 'fa-solid fa-moon'" aria-hidden="true"></i>
         <span>{{ isDark ? 'Light' : 'Dark' }}</span>
@@ -292,14 +413,81 @@ html.dark .nav-tab.is-active {
   border-radius: 9999px;
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
+  transition: all 0.15s ease;
+}
+.status-pill.cursor-pointer:hover {
+  border-color: var(--color-brand-400);
+  background: var(--color-surface-card);
 }
 
 .status-dot {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
+  transition: all 0.2s ease;
+}
+.status-dot.is-active {
   background: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+.status-dot.is-pending {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+}
+.status-dot.is-syncing {
+  background: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+  animation: pulse 1.5s infinite;
+}
+
+.sync-btn-action {
+  position: relative;
+}
+.sync-btn-action.is-syncing i {
+  color: #6366f1;
+}
+.sync-btn-action.has-pending i {
+  color: #f59e0b;
+}
+.sync-btn-action.is-connected i {
+  color: #10b981;
+}
+
+.sync-badge-pill {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.3rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  border-radius: 9999px;
+  background: #f59e0b;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.35);
+}
+
+.mobile-sync-badge {
+  position: absolute;
+  top: -0.4rem;
+  right: -0.65rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.2rem;
+  font-size: 0.6rem;
+  font-weight: 800;
+  border-radius: 9999px;
+  background: #f59e0b;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .status-pill-text {

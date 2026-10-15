@@ -67,6 +67,13 @@ export async function saveWhatsAppMappings(mappings, saveLocalBackup = true) {
   })
 }
 
+export async function requestWhatsAppPairingCode(phoneNumber) {
+  return await apiRequest('/pairing-code', {
+    method: 'POST',
+    body: JSON.stringify({ phoneNumber }),
+  })
+}
+
 export async function logoutWhatsApp() {
   return await apiRequest('/logout', {
     method: 'POST',

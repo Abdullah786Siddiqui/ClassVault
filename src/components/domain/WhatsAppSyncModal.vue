@@ -1,6 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { getWhatsAppStatus, getWhatsAppGroups, saveWhatsAppMappings, getWhatsAppMappings } from '../../services/whatsapp'
+import {
+  getWhatsAppStatus,
+  getWhatsAppGroups,
+  saveWhatsAppMappings,
+  getWhatsAppMappings,
+  requestWhatsAppPairingCode,
+} from '../../services/whatsapp'
 import { useToast } from '../../composables/useToast'
 import BottomSheet from '../ui/BottomSheet.vue'
 import BaseButton from '../ui/BaseButton.vue'
@@ -30,12 +36,19 @@ const isSaving = ref(false)
 const isInitialLoading = ref(true)
 const existingMapping = ref(null)
 
+// Pairing with phone number (Same-mobile flow)
+const pairingMode = ref('phone') // 'phone' | 'qr'
+const phoneNumber = ref('')
+const pairingCode = ref('')
+const isRequestingCode = ref(false)
+const hasCopiedCode = ref(false)
+const pairingError = ref('')
+
 let pollTimer = null
 
 /* ── Computed ────────────────────────────────────── */
 const isConnected = computed(() => botStatus.value.status === 'connected')
 const isQrReady = computed(() => botStatus.value.status === 'qr_ready' && Boolean(botStatus.value.qr))
-const isOffline = computed(() => botStatus.value.status === 'offline' || botStatus.value.status === 'disconnected')
 
 /* ── Fetch WhatsApp Data ─────────────────────────── */
 async function loadData() {
@@ -76,7 +89,6 @@ async function loadData() {
 function startPolling() {
   isInitialLoading.value = true
   loadData()
-  // Poll periodically while open to catch QR scans or state updates
   pollTimer = setInterval(loadData, 3000)
 }
 
@@ -92,6 +104,8 @@ watch(() => props.open, (isOpen) => {
     selectedGroupId.value = ''
     selectedGroupName.value = ''
     existingMapping.value = null
+    pairingCode.value = ''
+    pairingError.value = ''
     startPolling()
   } else {
     stopPolling()
@@ -103,6 +117,42 @@ onMounted(() => {
 })
 
 onUnmounted(stopPolling)
+
+/* ── Single Device Pairing (Phone Number Code) ───── */
+async function handleRequestPairingCode() {
+  const raw = phoneNumber.value.trim().replace(/[^0-9]/g, '')
+  if (!raw || raw.length < 9) {
+    pairingError.value = 'Please enter a valid phone number with country code (e.g. 03001234567 or 923001234567)'
+    return
+  }
+
+  pairingError.value = ''
+  isRequestingCode.value = true
+  try {
+    const res = await requestWhatsAppPairingCode(raw)
+    if (res?.ok && res.code) {
+      pairingCode.value = res.code
+      toast.success('Pairing code generated! Enter it in WhatsApp.')
+    } else {
+      pairingError.value = res?.error || 'Could not generate code. Please try again.'
+      toast.error(pairingError.value)
+    }
+  } catch (err) {
+    pairingError.value = err.message || 'Error requesting pairing code'
+    toast.error(pairingError.value)
+  } finally {
+    isRequestingCode.value = false
+  }
+}
+
+function copyPairingCode() {
+  if (!pairingCode.value) return
+  const raw = pairingCode.value.replace(/[^a-zA-Z0-9]/g, '')
+  navigator.clipboard.writeText(raw)
+  hasCopiedCode.value = true
+  toast.success('Code copied! Open WhatsApp and paste it.')
+  setTimeout(() => { hasCopiedCode.value = false }, 3000)
+}
 
 /* ── Group Selection ─────────────────────────────── */
 function handleGroupSelect(group) {
@@ -122,7 +172,6 @@ async function handleSave() {
     const mRes = await getWhatsAppMappings()
     let allMappings = mRes?.mappings || []
 
-    // Remove any existing entry for this subject
     allMappings = allMappings.filter(
       m => Number(m.subjectId) !== Number(props.subjectId) && m.subject !== props.subjectName
     )
@@ -179,7 +228,7 @@ async function handleRemove() {
 </script>
 
 <template>
-  <BottomSheet :open="open" title="Link to WhatsApp" @close="emit('close')">
+  <BottomSheet :open="open" title="Link WhatsApp to Vault" @close="emit('close')">
     <div class="space-y-5 pb-5">
 
       <!-- Subject Target Header Badge -->
@@ -198,7 +247,7 @@ async function handleRemove() {
       </div>
 
       <!-- ══════════════════════════════════════════════ -->
-      <!-- 1. INITIAL CONNECTING / LOADING STATE          -->
+      <!-- 1. INITIAL CONNECTING / CHECKING STATE         -->
       <!-- ══════════════════════════════════════════════ -->
       <div v-if="isInitialLoading" class="py-12 flex flex-col items-center justify-center gap-3 text-center">
         <div class="relative flex items-center justify-center">
@@ -212,7 +261,7 @@ async function handleRemove() {
         </div>
         <div>
           <p class="font-bold text-sm text-slate-800 dark:text-slate-200">Connecting to WhatsApp...</p>
-          <p class="text-xs text-slate-400 mt-0.5">Checking linked device and group list</p>
+          <p class="text-xs text-slate-400 mt-0.5">Checking linked device and groups</p>
         </div>
       </div>
 
@@ -341,7 +390,7 @@ async function handleRemove() {
 
           <p class="text-[11px] text-slate-400 leading-normal pt-1">
             <i class="fa-solid fa-circle-info text-emerald-500 mr-1"></i>
-            Whenever selected media is posted in the group, ClassVault will automatically save it under 
+            Files sent in this group will automatically be stored under 
             <strong class="text-slate-700 dark:text-slate-300">{{ subjectName }}</strong>.
           </p>
         </div>
@@ -361,55 +410,156 @@ async function handleRemove() {
       </div>
 
       <!-- ══════════════════════════════════════════════ -->
-      <!-- 3. QR READY STATE (Device Pairing)             -->
+      <!-- 3. NOT CONNECTED: PAIRING OPTIONS              -->
       <!-- ══════════════════════════════════════════════ -->
-      <div v-else-if="isQrReady" class="text-center space-y-4 py-2">
-        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold text-xs animate-pulse">
-          <i class="fa-solid fa-qrcode"></i> Scan to connect WhatsApp
+      <div v-else class="space-y-4 py-1">
+
+        <!-- Mode Toggle Tabs (Phone Number vs QR Code) -->
+        <div class="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/50">
+          <button
+            type="button"
+            class="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all"
+            :class="pairingMode === 'phone'
+              ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+              : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+            @click="pairingMode = 'phone'"
+          >
+            <i class="fa-solid fa-mobile-screen"></i>
+            <span>This Mobile (No Camera)</span>
+          </button>
+          <button
+            type="button"
+            class="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all"
+            :class="pairingMode === 'qr'
+              ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+              : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+            @click="pairingMode = 'qr'"
+          >
+            <i class="fa-solid fa-qrcode"></i>
+            <span>Scan QR (Laptop / PC)</span>
+          </button>
         </div>
 
-        <div class="w-64 h-64 mx-auto bg-white rounded-2xl shadow-xl border border-slate-200 flex items-center justify-center p-3">
-          <img :src="botStatus.qr" alt="WhatsApp QR Code" class="w-full h-full object-contain rounded-xl" />
+        <!-- ────────────────────────────────────────── -->
+        <!-- OPTION A: PAIR WITH PHONE NUMBER (SAME PHONE) -->
+        <!-- ────────────────────────────────────────── -->
+        <div v-if="pairingMode === 'phone'" class="space-y-4">
+          <div class="text-center space-y-1">
+            <h4 class="font-bold text-sm text-slate-800 dark:text-slate-100">
+              Link WhatsApp on this same phone
+            </h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto">
+              Enter your WhatsApp number. WhatsApp will give you an 8-character code to link directly without scanning!
+            </p>
+          </div>
+
+          <!-- Phone Number Input & Button -->
+          <div v-if="!pairingCode" class="space-y-3">
+            <div class="space-y-1.5 text-left">
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                WhatsApp Phone Number
+              </label>
+              <div class="relative flex items-center">
+                <i class="fa-solid fa-phone absolute left-3.5 text-slate-400 text-xs"></i>
+                <input
+                  v-model="phoneNumber"
+                  type="tel"
+                  placeholder="e.g. 03001234567 or 923001234567"
+                  class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-medium focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                  @keyup.enter="handleRequestPairingCode"
+                />
+              </div>
+              <p v-if="pairingError" class="text-xs text-red-500 flex items-center gap-1 mt-1">
+                <i class="fa-solid fa-circle-exclamation"></i> {{ pairingError }}
+              </p>
+            </div>
+
+            <BaseButton
+              variant="primary"
+              class="w-full bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-600/20 py-2.5 rounded-xl font-bold"
+              :disabled="isRequestingCode || !phoneNumber"
+              @click="handleRequestPairingCode"
+            >
+              <i v-if="isRequestingCode" class="fa-solid fa-circle-notch fa-spin mr-1.5"></i>
+              <i v-else class="fa-solid fa-key mr-1.5"></i>
+              <span>{{ isRequestingCode ? 'Generating Code...' : 'Get WhatsApp Pairing Code' }}</span>
+            </BaseButton>
+          </div>
+
+          <!-- Generated Code Display -->
+          <div v-else class="space-y-4">
+            <div class="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-300/50 text-center space-y-2">
+              <span class="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest block">
+                Your 8-Digit Pairing Code
+              </span>
+
+              <div class="font-mono text-2xl font-black text-emerald-900 dark:text-emerald-100 tracking-widest select-all py-1">
+                {{ pairingCode }}
+              </div>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                @click="copyPairingCode"
+              >
+                <i class="fa-solid" :class="hasCopiedCode ? 'fa-check' : 'fa-copy'"></i>
+                <span>{{ hasCopiedCode ? 'Copied to Clipboard!' : 'Copy Code' }}</span>
+              </button>
+            </div>
+
+            <!-- Steps Instructions -->
+            <div class="text-left bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-xs text-slate-600 dark:text-slate-400 space-y-2">
+              <p class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                <i class="fa-brands fa-whatsapp text-emerald-500 text-sm"></i>
+                Ab is phone par WhatsApp open karein:
+              </p>
+              <ol class="list-decimal list-inside space-y-1.5 pl-1 leading-relaxed">
+                <li>Agar WhatsApp ka <strong>Notification</strong> aaya hai to uspe tap karein.</li>
+                <li>Ya WhatsApp me <strong>Settings &rarr; Linked Devices &rarr; Link a Device</strong> par jayein.</li>
+                <li>Niche <strong>"Link with phone number instead"</strong> par tap karein.</li>
+                <li>Upar diya gaya code daal dein!</li>
+              </ol>
+            </div>
+
+            <div class="flex items-center justify-between text-xs text-slate-400 px-1">
+              <span class="flex items-center gap-1.5">
+                <i class="fa-solid fa-circle-notch fa-spin text-emerald-500"></i>
+                Waiting for WhatsApp confirmation...
+              </span>
+              <button
+                type="button"
+                class="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold"
+                @click="pairingCode = ''"
+              >
+                Change number
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div class="text-left bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-xs text-slate-600 dark:text-slate-400 space-y-2 max-w-sm mx-auto">
-          <p class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2 text-sm">
-            <i class="fa-solid fa-mobile-screen-button text-emerald-500"></i> How to connect:
-          </p>
-          <ol class="list-decimal list-inside space-y-1.5 pl-1 leading-relaxed">
-            <li>Open <strong>WhatsApp</strong> on your mobile phone</li>
-            <li>Tap <strong>Settings</strong> (or 3 dots menu) &rarr; <strong>Linked Devices</strong></li>
-            <li>Tap <strong>Link a Device</strong> and point camera here</li>
-          </ol>
+        <!-- ────────────────────────────────────────── -->
+        <!-- OPTION B: SCAN QR CODE (IF ON LAPTOP/PC)  -->
+        <!-- ────────────────────────────────────────── -->
+        <div v-else class="text-center space-y-4 py-1">
+          <div v-if="botStatus.qr" class="space-y-3">
+            <div class="w-60 h-60 mx-auto bg-white rounded-2xl shadow-lg border border-slate-200 flex items-center justify-center p-2.5">
+              <img :src="botStatus.qr" alt="WhatsApp QR Code" class="w-full h-full object-contain rounded-xl" />
+            </div>
+
+            <div class="text-left bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-xs text-slate-600 dark:text-slate-400 space-y-1 max-w-xs mx-auto">
+              <p class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <i class="fa-solid fa-camera text-emerald-500"></i> How to scan:
+              </p>
+              <p>WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device &rarr; Scan this QR</p>
+            </div>
+          </div>
+
+          <div v-else class="py-8 space-y-2 text-slate-400">
+            <i class="fa-solid fa-circle-notch fa-spin text-xl text-emerald-500"></i>
+            <p class="text-xs">Generating QR code...</p>
+          </div>
         </div>
 
-        <p class="text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
-          <i class="fa-solid fa-circle-notch fa-spin text-emerald-500"></i>
-          Waiting for scan... this will update automatically!
-        </p>
-      </div>
-
-      <!-- ══════════════════════════════════════════════ -->
-      <!-- 4. OFFLINE / INITIALIZING STATE (Friendly)     -->
-      <!-- ══════════════════════════════════════════════ -->
-      <div v-else class="text-center py-8 space-y-4">
-        <div class="w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto text-2xl">
-          <i class="fa-solid fa-plug-circle-exclamation"></i>
-        </div>
-        <div>
-          <h4 class="font-bold text-sm text-slate-800 dark:text-slate-200">
-            Connecting to WhatsApp Bridge...
-          </h4>
-          <p class="text-xs text-slate-400 max-w-xs mx-auto mt-1">
-            Setting up background sync service. Please wait a moment.
-          </p>
-        </div>
-
-        <div class="pt-2">
-          <BaseButton size="sm" variant="secondary" @click="loadData">
-            <i class="fa-solid fa-rotate-right mr-1.5"></i> Refresh Connection
-          </BaseButton>
-        </div>
       </div>
 
     </div>

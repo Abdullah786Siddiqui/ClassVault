@@ -318,6 +318,31 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, mappings: config.mappings })
     }
 
+    // POST /api/pairing-code (Link with phone number - no 2nd phone or camera needed)
+    if (meth === 'POST' && p === '/api/pairing-code') {
+      const body = await readBody(req)
+      let phone = String(body.phoneNumber || '').trim().replace(/[^0-9]/g, '')
+      if (phone.startsWith('0') && phone.length === 11) {
+        phone = '92' + phone.slice(1) // Convert local Pakistani 0300... to 92300...
+      }
+      if (!phone || phone.length < 9) {
+        return json(res, 400, { ok: false, error: 'Please enter a valid phone number with country code' })
+      }
+      if (!sock) {
+        return json(res, 500, { ok: false, error: 'WhatsApp service is initializing. Please wait a moment.' })
+      }
+      try {
+        console.log(`[Bot] Requesting pairing code for phone: ${phone}`)
+        const code = await sock.requestPairingCode(phone)
+        const formatted = code ? code.match(/.{1,4}/g)?.join('-') : code
+        console.log(`[Bot] Pairing code generated: ${formatted}`)
+        return json(res, 200, { ok: true, code: formatted, rawCode: code })
+      } catch (err) {
+        console.error('[Bot] Pairing code error:', err.message)
+        return json(res, 500, { ok: false, error: err.message || 'Failed to request pairing code' })
+      }
+    }
+
     // POST /api/logout
     if (meth === 'POST' && p === '/api/logout') {
       try { if (sock) await sock.logout().catch(() => {}) } catch { /* ok */ }

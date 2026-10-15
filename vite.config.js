@@ -2,6 +2,35 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig, loadEnv } from 'vite'
+import { spawn } from 'node:child_process'
+import http from 'node:http'
+import path from 'node:path'
+
+function autoStartWhatsAppBot() {
+  let hasChecked = false
+  return {
+    name: 'auto-start-whatsapp-bot',
+    configureServer() {
+      if (hasChecked) return
+      hasChecked = true
+      const req = http.get('http://localhost:4848/api/status', () => {
+        // already running
+      })
+      req.on('error', () => {
+        try {
+          const child = spawn('node', ['index.js'], {
+            cwd: path.resolve('whatsapp-bot'),
+            stdio: 'ignore',
+            detached: true,
+          })
+          child.unref()
+        } catch {
+          // ignore
+        }
+      })
+    },
+  }
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -13,6 +42,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       tailwindcss(),
+      autoStartWhatsAppBot(),
       VitePWA({
         strategies: 'injectManifest',
         srcDir: 'src',

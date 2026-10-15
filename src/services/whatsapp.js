@@ -74,6 +74,25 @@ export async function requestWhatsAppPairingCode(phoneNumber) {
   })
 }
 
+export async function getWhatsAppInbox() {
+  try {
+    return await apiRequest('/inbox')
+  } catch (err) {
+    return { ok: false, items: [], error: err.message }
+  }
+}
+
+export async function ackWhatsAppInbox(ids) {
+  try {
+    return await apiRequest('/inbox/ack', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
 export async function logoutWhatsApp() {
   return await apiRequest('/logout', {
     method: 'POST',

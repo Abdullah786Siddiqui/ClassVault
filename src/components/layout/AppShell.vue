@@ -10,6 +10,7 @@ import { requestNotificationPermission } from '../../services/notifications'
 import ToastHost from '../ui/ToastHost.vue'
 import BaseButton from '../ui/BaseButton.vue'
 import { BookOpen, Download } from '../ui/icons.js'
+import { syncIncomingWhatsAppItems } from '../../services/whatsappSync'
 
 defineProps({
   isInstallable: {
@@ -109,6 +110,14 @@ onMounted(async () => {
   } catch (e) {
     console.warn('[ClassVault] App mount check failed:', e)
   }
+
+  // Background polling for incoming WhatsApp items across the app
+  setInterval(() => {
+    syncIncomingWhatsAppItems((item) => {
+      syncStore.refreshCounts()
+      toast.info(`📥 Saved WhatsApp ${item.type} into ${item.subject || 'Vault'}`)
+    })
+  }, 6000)
 })
 
 // SW update detection

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useItemStore } from '../stores/items'
 import { useSemesterStore } from '../stores/semesters'
@@ -19,6 +19,7 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 import WhatsAppSyncModal from '../components/domain/WhatsAppSyncModal.vue'
 import { getWhatsAppMappings } from '../services/whatsapp'
+import { syncIncomingWhatsAppItems } from '../services/whatsappSync'
 import { FileText, Camera, UploadCloud } from '../components/ui/icons.js'
 
 const route = useRoute()
@@ -81,6 +82,32 @@ watch(
   loadSubjectPage,
   { immediate: true },
 )
+
+let liveSyncTimer = null
+
+async function checkWhatsAppSync() {
+  await syncIncomingWhatsAppItems((newItem) => {
+    if (
+      Number(newItem.subjectId) === Number(route.params.subjectId) &&
+      newItem.exam === route.params.exam
+    ) {
+      itemStore.loadSubjectItems(route.params.semesterId, route.params.subjectId, route.params.exam)
+      toast.success(`📷 New ${newItem.type} received from WhatsApp group!`)
+    }
+  })
+}
+
+onMounted(() => {
+  checkWhatsAppSync()
+  liveSyncTimer = setInterval(checkWhatsAppSync, 3000)
+})
+
+onUnmounted(() => {
+  if (liveSyncTimer) {
+    clearInterval(liveSyncTimer)
+    liveSyncTimer = null
+  }
+})
 
 const examType = computed(() => route.params.exam || '')
 

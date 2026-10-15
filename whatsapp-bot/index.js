@@ -36,6 +36,17 @@ function saveConfig(c) {
 
 let config = loadConfig()
 
+const INBOX_PATH = path.resolve('inbox.json')
+function loadInbox() {
+  if (!fs.existsSync(INBOX_PATH)) return []
+  try { return JSON.parse(fs.readFileSync(INBOX_PATH, 'utf8')) }
+  catch { return [] }
+}
+function saveInbox(items) {
+  try { fs.writeFileSync(INBOX_PATH, JSON.stringify(items, null, 2), 'utf8') } catch {}
+}
+let inbox = loadInbox()
+
 // ----------------------------------------------------------
 // Google Drive
 // ----------------------------------------------------------
@@ -178,7 +189,7 @@ function scheduleRetry(delay = 5000) {
 // ----------------------------------------------------------
 async function handleIncomingMessage(msg) {
   try {
-    if (!msg.message || msg.key.fromMe) return
+    if (!msg.message) return
     const remoteJid = msg.key.remoteJid || ''
     if (!remoteJid.endsWith('@g.us')) return   // only group messages
 
@@ -202,7 +213,14 @@ async function handleIncomingMessage(msg) {
 
     if (!mapping2) return  // not a monitored group
 
-    const mc = msg.message
+    // Unwrap ephemeral, viewOnce, or captioned documents
+    let mc = msg.message
+    if (!mc) return
+    if (mc.ephemeralMessage) mc = mc.ephemeralMessage.message
+    if (mc.viewOnceMessage) mc = mc.viewOnceMessage.message
+    if (mc.viewOnceMessageV2) mc = mc.viewOnceMessageV2.message
+    if (mc.documentWithCaptionMessage) mc = mc.documentWithCaptionMessage.message
+
     const isImage = Boolean(mc.imageMessage)
     const isDoc   = Boolean(mc.documentMessage)
     const isText  = Boolean(mc.conversation || mc.extendedTextMessage)
@@ -215,8 +233,7 @@ async function handleIncomingMessage(msg) {
     if (isText && allowText) {
       const text = mc.conversation || mc.extendedTextMessage?.text || ''
       if (!text.trim()) return
-      console.log(`[Bot] Text from "${mapping2.groupName}" → ${mapping2.subject}`)
-      // For now log — Dexie is frontend-only; Drive text note not implemented
+      console.log(`[Bot] Text message from "${mapping2.groupName}" → ${mapping2.subject}`)
     }
 
     if (!isImage && !isDoc) return
@@ -227,16 +244,21 @@ async function handleIncomingMessage(msg) {
     const mimeType = mediaMsg.mimetype || (isImage ? 'image/jpeg' : 'application/octet-stream')
     const ext = mimeType.split('/')[1]?.split(';')[0] || (isImage ? 'jpg' : 'bin')
     const caption = mediaMsg.caption || ''
-    const fileName = mediaMsg.fileName || `wa_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
+    const fileName = mediaMsg.fileName || `WA_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
 
-    console.log(`[Bot] ${isImage ? 'Image' : 'File'} "${fileName}" → ${mapping2.semester} / ${mapping2.exam} / ${mapping2.subject}`)
+    console.log(`[Bot] Received ${isImage ? 'image' : 'file'} "${fileName}" for ${mapping2.semester} / ${mapping2.exam} / ${mapping2.subject}`)
 
-    const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
-      logger: pino({ level: 'silent' }),
-      reuploadRequest: sock.updateMediaMessage,
-    })
+    const buffer = await downloadMediaMessage(
+      { key: msg.key, message: mc },
+      'buffer',
+      {},
+      {
+        logger: pino({ level: 'silent' }),
+        reuploadRequest: sock.updateMediaMessage,
+      }
+    )
 
-    // Local backup
+    // Local disk backup
     if (config.saveLocalBackup) {
       const dir = path.resolve(config.localBackupDir || './downloads', mapping2.semester, mapping2.exam, mapping2.subject)
       fs.mkdirSync(dir, { recursive: true })
@@ -244,12 +266,36 @@ async function handleIncomingMessage(msg) {
       console.log(`[Bot] Saved locally: ${dir}/${fileName}`)
     }
 
-    // Google Drive
+    // Google Drive backup
     if (drive) {
       const r = await uploadBufferToDrive({ drive, buffer, fileName, mimeType,
         semester: mapping2.semester, exam: mapping2.exam, subject: mapping2.subject, caption })
       console.log(`[Bot] Uploaded to Drive: ${r.id}`)
     }
+
+    // Deliver to ClassVault web app inbox
+    const inboxItem = {
+      id: msg.key.id || `wa_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      semesterId: mapping2.semesterId,
+      subjectId: mapping2.subjectId,
+      semester: mapping2.semester,
+      exam: mapping2.exam,
+      subject: mapping2.subject,
+      groupName: mapping2.groupName,
+      type: isImage ? 'image' : (isDoc ? 'file' : 'text'),
+      title: caption || fileName,
+      caption: caption || '',
+      fileName: fileName,
+      mimeType: mimeType,
+      base64: buffer.toString('base64'),
+      fileSize: buffer.length,
+      createdAt: new Date().toISOString(),
+      timestamp: Date.now(),
+    }
+    inbox.push(inboxItem)
+    if (inbox.length > 100) inbox = inbox.slice(-100)
+    saveInbox(inbox)
+    console.log(`[Bot] Queued in inbox for ClassVault app: "${fileName}" (total in inbox: ${inbox.length})`)
   } catch (err) {
     console.error('[Bot] Error handling message:', err.message)
   }
@@ -340,6 +386,20 @@ const server = http.createServer(async (req, res) => {
         console.error('[Bot] Pairing code error:', err.message)
         return json(res, 500, { ok: false, error: err.message || 'Failed to request pairing code' })
       }
+    }
+
+    // GET /api/inbox (or /api/sync/inbox)
+    if (meth === 'GET' && (p === '/api/inbox' || p === '/api/sync/inbox')) {
+      return json(res, 200, { ok: true, items: inbox })
+    }
+
+    // POST /api/inbox/ack (or /api/sync/ack)
+    if (meth === 'POST' && (p === '/api/inbox/ack' || p === '/api/sync/ack')) {
+      const body = await readBody(req)
+      const ackIds = new Set(Array.isArray(body.ids) ? body.ids : [])
+      inbox = inbox.filter(item => !ackIds.has(item.id))
+      saveInbox(inbox)
+      return json(res, 200, { ok: true, remaining: inbox.length })
     }
 
     // POST /api/logout

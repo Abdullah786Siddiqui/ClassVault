@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch } from 'vue'
 import BaseButton from '../ui/BaseButton.vue'
 import BaseInput from '../ui/BaseInput.vue'
 import BaseTextarea from '../ui/BaseTextarea.vue'
@@ -8,7 +8,7 @@ import { useObjectUrl } from '../../composables/useObjectUrl'
 import { useSyncStore } from '../../stores/sync'
 import { useToast } from '../../composables/useToast'
 import { formatDate, formatFileSize } from '../../utils/format'
-import { X, Trash2, Edit3, Download, ExternalLink } from '../ui/icons.js'
+import { X, Trash2, Edit3, Download, ExternalLink, Maximize2 } from '../ui/icons.js'
 
 const props = defineProps({
   item: {
@@ -28,25 +28,22 @@ const editText = ref('')
 const editCaption = ref('')
 const isDownloading = ref(false)
 const downloadedBlob = ref(null)
-
-// Fullscreen photo lightbox state
-const isPhotoFullscreen = ref(false)
+const isFullScreen = ref(false)
 
 watch(
   () => props.item,
-  async (newItem) => {
+  (newItem) => {
     isEditing.value = false
     downloadedBlob.value = null
-    isPhotoFullscreen.value = false
+    isFullScreen.value = false
     if (newItem) {
       editTitle.value = newItem.title || ''
       editText.value = newItem.text || ''
       editCaption.value = newItem.caption || ''
 
-      // Auto-fetch full resolution for photos if only thumbnail or no blob
-      if (newItem.type === 'photo' && !newItem.blob && newItem.driveFileId && newItem.syncStatus === 'synced') {
-        await nextTick()
-        autoFetchFullRes()
+      // Automatically fetch full resolution from Drive if not cached locally
+      if (newItem.type === 'photo' && !newItem.blob && newItem.driveFileId && navigator.onLine) {
+        handleFetchFromDrive({ silent: true })
       }
     }
   },
@@ -56,11 +53,6 @@ watch(
 // Active blob: local full blob > on-demand downloaded blob > thumbnail
 const activeBlob = computed(() => {
   return props.item?.blob || downloadedBlob.value || props.item?.thumbBlob || null
-})
-
-// Whether we're showing a thumbnail (low-res) vs full image
-const isShowingThumbnailOnly = computed(() => {
-  return !props.item?.blob && !downloadedBlob.value && !!props.item?.thumbBlob
 })
 
 const objectUrl = useObjectUrl(activeBlob)
@@ -76,33 +68,21 @@ function handleSaveEdit() {
   isEditing.value = false
 }
 
-async function autoFetchFullRes() {
-  if (!props.item?.driveFileId || isDownloading.value) return
-  isDownloading.value = true
-  try {
-    const blob = await syncStore.downloadFile(props.item)
-    downloadedBlob.value = blob
-  } catch {
-    // Silently fail — user can still see the thumbnail
-  } finally {
-    isDownloading.value = false
-  }
-}
-
-async function handleFetchFromDrive() {
+async function handleFetchFromDrive({ silent = false } = {}) {
   if (!props.item?.driveFileId) {
-    toast.error('File has not been uploaded to Google Drive yet')
-    return
+    if (!silent) toast.error('File has not been uploaded to Google Drive yet')
+    return null
   }
 
   isDownloading.value = true
   try {
     const blob = await syncStore.downloadFile(props.item)
     downloadedBlob.value = blob
-    toast.success('Downloaded from Google Drive')
+    if (!silent) toast.success('Loaded original full resolution photo')
     return blob
   } catch (err) {
-    toast.error(err.message || 'Failed to download file from Drive')
+    if (!silent) toast.error(err.message || 'Failed to download file from Drive')
+    return null
   } finally {
     isDownloading.value = false
   }
@@ -124,63 +104,16 @@ async function handleOpenFile() {
   document.body.removeChild(a)
   setTimeout(() => URL.revokeObjectURL(url), 60000)
 }
-
-function openPhotoFullscreen() {
-  if (objectUrl.value) {
-    isPhotoFullscreen.value = true
-  }
-}
-
-function closePhotoFullscreen() {
-  isPhotoFullscreen.value = false
-}
 </script>
 
 <template>
   <Teleport to="body">
-    <!-- Fullscreen Photo Lightbox -->
-    <Transition name="lightbox-fade">
-      <div
-        v-if="isPhotoFullscreen && objectUrl"
-        class="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-sm"
-        @click.self="closePhotoFullscreen"
-      >
-        <!-- Close Button -->
-        <button
-          type="button"
-          aria-label="Close fullscreen"
-          class="absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-sm hover:bg-white/20 hover:text-white transition-all"
-          @click="closePhotoFullscreen"
-        >
-          <X class="h-5 w-5" />
-        </button>
-
-        <!-- Full Resolution Image -->
-        <img
-          :src="objectUrl"
-          :alt="item?.caption || item?.title || 'Photo'"
-          class="max-h-[95dvh] max-w-[95vw] object-contain select-none"
-          style="touch-action: pinch-zoom;"
-          @click.stop
-        />
-
-        <!-- Loading indicator if still fetching full res -->
-        <div
-          v-if="isDownloading"
-          class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-xs text-white/80 backdrop-blur-sm"
-        >
-          <span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/60 border-t-transparent"></span>
-          <span>Loading full resolution...</span>
-        </div>
-      </div>
-    </Transition>
-
     <div
       v-if="item"
       class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 sm:p-4 backdrop-blur-xs"
       @click.self="emit('close')"
     >
-      <div class="relative flex w-full max-h-[90dvh] sm:max-h-[92vh] sm:max-w-xl flex-col overflow-hidden sm:rounded-3xl rounded-t-2xl border-0 sm:border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+      <div :class="['relative flex w-full flex-col overflow-hidden sm:rounded-3xl rounded-t-2xl border-0 sm:border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', item.type === 'photo' ? 'sm:max-w-4xl max-h-[96dvh] sm:max-h-[95vh]' : 'sm:max-w-xl max-h-[90dvh] sm:max-h-[92vh]']">
         <!-- Header -->
         <div class="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800 sm:px-5 sm:py-4">
           <div class="flex items-center gap-2.5 min-w-0">
@@ -189,6 +122,17 @@ function closePhotoFullscreen() {
           </div>
 
           <div class="flex items-center gap-1.5">
+            <button
+              v-if="item.type === 'photo' && objectUrl"
+              type="button"
+              aria-label="Full screen photo"
+              title="Full screen photo"
+              class="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              @click="isFullScreen = true"
+            >
+              <Maximize2 class="h-4 w-4" />
+            </button>
+
             <button
               v-if="item.type === 'text' && !isEditing"
               type="button"
@@ -258,62 +202,52 @@ function closePhotoFullscreen() {
 
           <!-- Photo View -->
           <div v-else-if="item.type === 'photo'" class="space-y-4">
-            <div
-              class="relative overflow-hidden rounded-2xl bg-slate-950 flex min-h-[240px] items-center justify-center cursor-pointer group"
-              @click="openPhotoFullscreen"
-            >
+            <div class="relative overflow-hidden rounded-2xl bg-slate-950 flex min-h-[260px] sm:min-h-[360px] items-center justify-center group/photo">
               <img
                 v-if="objectUrl"
                 :src="objectUrl"
                 :alt="item.caption || item.title"
-                class="max-h-[60vh] w-auto max-w-full object-contain transition-transform duration-200 group-hover:scale-[1.02]"
+                class="max-h-[72vh] w-auto max-w-full object-contain cursor-zoom-in transition-transform active:scale-98"
+                style="image-rendering: auto;"
+                @click="isFullScreen = true"
               />
 
-              <!-- Loading state while auto-fetching full res -->
+              <!-- Loading overlay while fetching original full resolution -->
               <div
-                v-if="isDownloading && !objectUrl"
-                class="flex flex-col items-center justify-center gap-3 p-10 text-center text-slate-400"
+                v-if="isDownloading"
+                class="absolute top-3 left-3 flex items-center gap-2 rounded-full bg-slate-950/80 px-3 py-1.5 text-xs text-white shadow-lg backdrop-blur-md"
               >
-                <span class="h-8 w-8 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent"></span>
-                <p class="text-sm font-semibold">Loading from Google Drive...</p>
+                <div class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent"></div>
+                <span class="font-medium">Loading full resolution...</span>
               </div>
 
-              <!-- No image available at all -->
+              <!-- Fullscreen hint button overlay on image -->
+              <button
+                v-if="objectUrl"
+                type="button"
+                aria-label="Open Fullscreen"
+                class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-slate-950/80 px-3 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur-md hover:bg-slate-900 transition-colors"
+                @click="isFullScreen = true"
+              >
+                <Maximize2 class="h-3.5 w-3.5" />
+                <span>Full screen</span>
+              </button>
+
               <div
-                v-else-if="!objectUrl"
+                v-else-if="!isDownloading"
                 class="flex flex-col items-center justify-center gap-3 p-10 text-center text-slate-400"
               >
-                <Download class="h-8 w-8 text-indigo-500" />
-                <p class="text-sm font-semibold">Photo not available locally</p>
+                <p class="text-sm font-semibold">Photo not cached locally</p>
                 <BaseButton
                   v-if="item.syncStatus === 'synced'"
                   variant="primary"
                   size="sm"
                   :loading="isDownloading"
-                  @click.stop="handleFetchFromDrive"
+                  @click="handleFetchFromDrive({ silent: false })"
                 >
                   <Download class="h-4 w-4" />
                   <span>Fetch from Google Drive</span>
                 </BaseButton>
-              </div>
-
-              <!-- Tap to view full screen hint -->
-              <div
-                v-if="objectUrl"
-                class="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-colors pointer-events-none"
-              >
-                <div class="opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm">
-                  Tap to view full screen
-                </div>
-              </div>
-
-              <!-- Loading spinner overlay while fetching full res (thumbnail is showing) -->
-              <div
-                v-if="isDownloading && objectUrl && isShowingThumbnailOnly"
-                class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 text-[10px] text-white/80 backdrop-blur-sm"
-              >
-                <span class="h-3 w-3 animate-spin rounded-full border border-white/60 border-t-transparent"></span>
-                <span>Loading HD...</span>
               </div>
             </div>
 
@@ -352,19 +286,51 @@ function closePhotoFullscreen() {
             </div>
           </div>
         </div>
-      </div>
     </div>
+
+    <!-- Dedicated Full Screen Photo Modal (Actual Resolution, No Blur, Full Viewport) -->
+    <div
+      v-if="isFullScreen && objectUrl"
+      class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/95 p-2 sm:p-4 backdrop-blur-md select-none"
+      @click.self="isFullScreen = false"
+    >
+      <div class="absolute top-4 right-4 z-10 flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Open full resolution in new tab"
+          title="Open original in browser"
+          class="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white hover:bg-white/30 backdrop-blur-md transition-colors"
+          @click="handleOpenFile"
+        >
+          <ExternalLink class="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          aria-label="Close fullscreen"
+          title="Close fullscreen"
+          class="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white hover:bg-white/30 backdrop-blur-md transition-colors"
+          @click="isFullScreen = false"
+        >
+          <X class="h-6 w-6" />
+        </button>
+      </div>
+
+      <div
+        v-if="isDownloading"
+        class="absolute top-4 left-4 z-10 flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 text-xs text-white backdrop-blur-md"
+      >
+        <div class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent"></div>
+        <span>Upgrading to original resolution...</span>
+      </div>
+
+      <img
+        :src="objectUrl"
+        :alt="item.caption || item.title"
+        class="h-auto w-auto max-h-[94vh] max-w-[96vw] object-contain shadow-2xl"
+        style="image-rendering: auto;"
+      />
+    </div>
+        </div>
+
   </Teleport>
 </template>
-
-<style scoped>
-.lightbox-fade-enter-active,
-.lightbox-fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.lightbox-fade-enter-from,
-.lightbox-fade-leave-to {
-  opacity: 0;
-}
-</style>

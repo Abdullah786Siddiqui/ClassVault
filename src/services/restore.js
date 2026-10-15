@@ -4,6 +4,7 @@ import {
   getDriveAccessToken,
   listDriveFiles,
   requestDriveUrl,
+  getStoredUserEmail,
 } from './drive'
 
 const ROOT_FOLDER_NAMES = new Set(['classvault', 'class notes vault'])
@@ -43,14 +44,22 @@ function isVaultPath(names) {
 }
 
 async function ensureSemester(name) {
-  const existing = await db.semesters.filter((row) => row.name.trim().toLowerCase() === name.trim().toLowerCase()).first()
+  const userEmail = getStoredUserEmail() || ''
+  const existing = await db.semesters
+    .filter((row) => row.name.trim().toLowerCase() === name.trim().toLowerCase() && (!row.userEmail || row.userEmail === userEmail))
+    .first()
   if (existing) {
+    if (!existing.userEmail && userEmail) {
+      await db.semesters.update(existing.id, { userEmail })
+      existing.userEmail = userEmail
+    }
     return existing
   }
 
   const id = await db.semesters.add({
     name,
     exams: [],
+    userEmail,
     createdAt: new Date().toISOString(),
   })
   return db.semesters.get(id)
@@ -78,15 +87,23 @@ async function ensureExam(semester, examName, examIdHint) {
 }
 
 async function ensureSubject(semesterId, name) {
+  const userEmail = getStoredUserEmail() || ''
   const existing = await db.subjects
     .where({ semesterId: Number(semesterId) })
     .filter((row) => row.name.trim().toLowerCase() === name.trim().toLowerCase())
     .first()
-  if (existing) return existing
+  if (existing) {
+    if (!existing.userEmail && userEmail) {
+      await db.subjects.update(existing.id, { userEmail })
+      existing.userEmail = userEmail
+    }
+    return existing
+  }
 
   const id = await db.subjects.add({
     semesterId: Number(semesterId),
     name,
+    userEmail,
     createdAt: new Date().toISOString(),
   })
   return db.subjects.get(id)
@@ -192,6 +209,7 @@ export async function restoreLibraryFromDrive() {
       ? await (await downloadDriveFile(file.id, auth.accessToken)).text()
       : ''
 
+    const userEmail = getStoredUserEmail() || ''
     await db.items.add({
       semesterId: Number(semester.id),
       subjectId: Number(subject.id),
@@ -209,6 +227,7 @@ export async function restoreLibraryFromDrive() {
       syncStatus: 'synced',
       driveFileId: file.id,
       driveModifiedTime: file.modifiedTime || '',
+      userEmail,
       errorMessage: '',
       retryAt: 0,
       retryCount: 0,

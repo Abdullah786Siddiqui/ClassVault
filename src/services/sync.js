@@ -230,7 +230,7 @@ export async function syncPendingItems(onProgress) {
               accessToken: auth.accessToken,
             })
 
-            // Mark synced: preserve thumbBlob, clear full blob to save storage
+            // Mark synced: preserve full blob so local photos remain crisp & available offline
             await db.items.update(item.id, {
               syncStatus: 'synced',
               driveFileId: result.id,
@@ -238,8 +238,8 @@ export async function syncPendingItems(onProgress) {
               errorMessage: '',
               retryAt: 0,
               retryCount: 0,
-              blob: null,
-              thumbBlob: thumbBlob || null,
+              blob: item.blob || null,
+              thumbBlob: thumbBlob || item.thumbBlob || null,
               updatedAt: new Date().toISOString(),
             })
 
@@ -335,6 +335,14 @@ export async function fetchDriveFileOnDemand(item) {
     mimeType: item.mimeType,
     cachedAt: Date.now(),
   })
+
+  // Update item in local items database so it stays permanently cached
+  if (item.id) {
+    await db.items.update(item.id, {
+      blob: downloadedBlob,
+      thumbBlob: downloadedBlob,
+    }).catch(() => {})
+  }
 
   // 6. Enforce cache limit (MAX_CACHED_FILES)
   const cachedFiles = await db.filesCache.orderBy('cachedAt').toArray()

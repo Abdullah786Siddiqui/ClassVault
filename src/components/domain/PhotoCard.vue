@@ -1,11 +1,12 @@
 <script setup>
-import { computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import BaseCard from '../ui/BaseCard.vue'
 import SyncStatusBadge from './SyncStatusBadge.vue'
 import IconButton from '../ui/IconButton.vue'
 import { useObjectUrl } from '../../composables/useObjectUrl'
 import { formatDate } from '../../utils/format'
-import { Image as ImageIcon, Trash2, CloudDownload } from '../ui/icons.js'
+import { Image as ImageIcon, Trash2, CloudDownload, RefreshCw } from '../ui/icons.js'
+import { fetchDriveFileOnDemand } from '../../services/sync'
 
 const props = defineProps({
   item: {
@@ -16,9 +17,44 @@ const props = defineProps({
 
 const emit = defineEmits(['open', 'delete'])
 
-// Use thumbnail if available, otherwise original local blob
-const activeBlob = computed(() => props.item.thumbBlob || props.item.blob)
+const localBlob = ref(null)
+const isAutoLoading = ref(false)
+
+// Use thumbnail if available, otherwise original local blob or auto-fetched blob
+const activeBlob = computed(() => props.item.thumbBlob || props.item.blob || localBlob.value)
 const imageUrl = useObjectUrl(activeBlob)
+
+async function autoFetchBlob() {
+  if (activeBlob.value) return
+  if (!props.item.driveFileId || props.item.syncStatus !== 'synced' || !navigator.onLine) return
+  
+  isAutoLoading.value = true
+  try {
+    const blob = await fetchDriveFileOnDemand(props.item)
+    if (blob) {
+      localBlob.value = blob
+    }
+  } catch {
+    // Keep placeholder on network error
+  } finally {
+    isAutoLoading.value = false
+  }
+}
+
+onMounted(() => {
+  autoFetchBlob()
+})
+
+watch(
+  () => [props.item?.id, props.item?.driveFileId, props.item?.blob, props.item?.thumbBlob],
+  () => {
+    if (props.item?.blob || props.item?.thumbBlob) {
+      localBlob.value = null
+    } else {
+      autoFetchBlob()
+    }
+  },
+)
 
 const formattedDate = computed(() => formatDate(props.item.createdAt))
 </script>
@@ -44,8 +80,13 @@ const formattedDate = computed(() => formatDate(props.item.createdAt))
         v-else-if="item.syncStatus === 'synced'"
         class="flex h-full w-full flex-col items-center justify-center gap-1.5 p-4 text-center text-slate-400 dark:text-slate-500"
       >
-        <CloudDownload class="h-8 w-8 text-indigo-500" />
-        <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">Tap to load from Drive</span>
+        <component
+          :is="isAutoLoading ? RefreshCw : CloudDownload"
+          :class="['h-8 w-8 text-indigo-500', isAutoLoading ? 'animate-spin' : '']"
+        />
+        <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">
+          {{ isAutoLoading ? 'Loading photo...' : 'Tap to load from Drive' }}
+        </span>
       </div>
 
       <div
@@ -60,8 +101,8 @@ const formattedDate = computed(() => formatDate(props.item.createdAt))
         <SyncStatusBadge :status="item.syncStatus" />
       </div>
 
-      <!-- Delete action overlay (always visible on touch/mobile) -->
-      <div class="absolute top-2 right-2 opacity-100 sm:opacity-0 transition-opacity sm:group-hover:opacity-100 focus-within:opacity-100">
+      <!-- Delete action overlay -->
+      <div class="absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 sm-touch-actions">
         <IconButton
           :icon="Trash2"
           aria-label="Delete photo"

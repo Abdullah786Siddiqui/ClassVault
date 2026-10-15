@@ -17,8 +17,9 @@ import AddItemSheet from '../components/domain/AddItemSheet.vue'
 import ItemViewer from '../components/domain/ItemViewer.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import BaseButton from '../components/ui/BaseButton.vue'
 import WhatsAppSyncModal from '../components/domain/WhatsAppSyncModal.vue'
-import { getWhatsAppMappings } from '../services/whatsapp'
+import { getWhatsAppMappings, saveWhatsAppMappings } from '../services/whatsapp'
 import { syncIncomingWhatsAppItems } from '../services/whatsappSync'
 import { FileText, Camera, UploadCloud } from '../components/ui/icons.js'
 
@@ -37,16 +38,32 @@ const loadError = ref('')
 const isWhatsAppOpen = ref(false)
 const linkedGroup = ref(null)
 
+const photoPage = ref(1)
+const photosPerPage = 10
+
 async function refreshWhatsAppMapping() {
   try {
     const res = await getWhatsAppMappings()
     if (res?.ok && Array.isArray(res.mappings)) {
-      const match = res.mappings.find(
-        (m) =>
-          Number(m.subjectId) === Number(route.params.subjectId) ||
-          m.subject === subject.value?.name
-      )
+      const currentSubId = Number(route.params.subjectId)
+      const currentSubName = (subject.value?.name || '').trim().toLowerCase()
+
+      const match = res.mappings.find((m) => {
+        if (Number(m.subjectId) === currentSubId) return true
+        if (currentSubName && (m.subject || '').trim().toLowerCase() === currentSubName) return true
+        return false
+      })
+
       linkedGroup.value = match || null
+
+      // If matched by name but subjectId shifted (e.g. after drive reconnect / restore),
+      // auto-update the mapping on the WhatsApp bot server so subjectId stays permanently linked!
+      if (match && currentSubId && (Number(match.subjectId) !== currentSubId || Number(match.semesterId) !== Number(route.params.semesterId))) {
+        match.subjectId = currentSubId
+        match.semesterId = Number(route.params.semesterId)
+        if (subject.value?.name) match.subject = subject.value.name
+        saveWhatsAppMappings(res.mappings).catch(() => {})
+      }
     } else {
       linkedGroup.value = null
     }
@@ -58,9 +75,10 @@ async function refreshWhatsAppMapping() {
 async function loadSubjectPage() {
   loadError.value = ''
   try {
+    // Await semesterStore first so subject.value is known when refreshWhatsAppMapping runs
+    await semesterStore.load()
     await Promise.all([
       itemStore.loadSubjectItems(route.params.semesterId, route.params.subjectId, route.params.exam),
-      semesterStore.load(),
       authStore.refreshPendingCount(),
       refreshWhatsAppMapping(),
     ])
@@ -144,6 +162,28 @@ const allSubjectItems = computed(() => {
 const notesList = computed(() => allSubjectItems.value.filter((i) => i.type === 'text'))
 const photosList = computed(() => allSubjectItems.value.filter((i) => i.type === 'photo'))
 const filesList = computed(() => allSubjectItems.value.filter((i) => i.type === 'file'))
+
+const totalPhotoPages = computed(() => {
+  return Math.ceil(photosList.value.length / photosPerPage) || 1
+})
+
+const paginatedPhotos = computed(() => {
+  const start = (photoPage.value - 1) * photosPerPage
+  return photosList.value.slice(start, start + photosPerPage)
+})
+
+watch(
+  () => [route.params.semesterId, route.params.subjectId, route.params.exam, activeTab.value],
+  () => {
+    photoPage.value = 1
+  },
+)
+
+watch(totalPhotoPages, (max) => {
+  if (photoPage.value > max) {
+    photoPage.value = max
+  }
+})
 
 const tabs = computed(() => [
   { value: 'text', label: 'Notes', count: notesList.value.length, icon: FileText },
@@ -354,19 +394,51 @@ function openViewer(item) {
 
       <!-- Photos Tab -->
       <div v-else-if="activeTab === 'photo'">
-      <div
-        v-if="photosList.length"
-        class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4"
-      >
-        <PhotoCard
-          v-for="item in photosList"
-          :key="item.id"
-          :item="item"
-          class="item-animate-in"
-          @open="openViewer"
-          @delete="promptDeleteItem"
-        />
-      </div>
+        <div v-if="photosList.length" class="space-y-4">
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+            <PhotoCard
+              v-for="item in paginatedPhotos"
+              :key="item.id"
+              :item="item"
+              class="item-animate-in"
+              @open="openViewer"
+              @delete="promptDeleteItem"
+            />
+          </div>
+
+          <!-- Pagination Bar (10 photos per page) -->
+          <div
+            v-if="totalPhotoPages > 1"
+            class="flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white/70 p-3 shadow-xs backdrop-blur-xs dark:border-slate-800 dark:bg-slate-900/60"
+          >
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+              Showing {{ (photoPage - 1) * photosPerPage + 1 }}–{{ Math.min(photoPage * photosPerPage, photosList.length) }} of {{ photosList.length }} photos
+            </p>
+            <div class="flex items-center gap-1.5">
+              <BaseButton
+                variant="secondary"
+                size="sm"
+                :disabled="photoPage <= 1"
+                @click="photoPage--"
+              >
+                Previous
+              </BaseButton>
+              <div class="flex items-center gap-1 px-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span>{{ photoPage }}</span>
+                <span class="text-slate-400">/</span>
+                <span>{{ totalPhotoPages }}</span>
+              </div>
+              <BaseButton
+                variant="secondary"
+                size="sm"
+                :disabled="photoPage >= totalPhotoPages"
+                @click="photoPage++"
+              >
+                Next
+              </BaseButton>
+            </div>
+          </div>
+        </div>
       <EmptyState
         v-else
         :icon="Camera"

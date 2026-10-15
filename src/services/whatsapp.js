@@ -2,10 +2,29 @@
  * Service to interact with the ClassVault WhatsApp Bot
  */
 
-const BASE_URL = '/api/whatsapp'
+const ENV_BOT_URL = (import.meta.env.VITE_WHATSAPP_BOT_URL || '').trim().replace(/\/$/, '')
+const BASE_URL = ENV_BOT_URL ? `${ENV_BOT_URL}/api` : '/api/whatsapp'
 const DIRECT_URL = 'http://localhost:4848/api'
 
 async function apiRequest(endpoint, options = {}) {
+  // If an external backend URL is specified via VITE_WHATSAPP_BOT_URL
+  if (ENV_BOT_URL) {
+    try {
+      const res = await fetch(`${ENV_BOT_URL}/api${endpoint}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      })
+      if (res.ok) {
+        return await res.json()
+      }
+    } catch (err) {
+      throw new Error('WhatsApp bot server is unreachable.')
+    }
+  }
+
   // First attempt via Vite proxy
   try {
     const res = await fetch(`${BASE_URL}${endpoint}`, {

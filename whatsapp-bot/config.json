@@ -39,8 +39,8 @@
       "exam": "mid-term",
       "subject": "Math",
       "allowImages": true,
-      "allowFiles": false,
-      "allowText": true
+      "allowFiles": true,
+      "allowText": false
     }
   ],
   "saveLocalBackup": true,

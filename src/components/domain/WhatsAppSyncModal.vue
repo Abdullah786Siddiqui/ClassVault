@@ -536,8 +536,33 @@ async function handleRemove() {
       <!-- ══════════════════════════════════════════════ -->
       <div v-else class="space-y-4 py-1">
 
-        <!-- Mode Toggle Tabs (Phone Number vs QR Code) -->
-        <div class="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/50">
+        <!-- Offline / Service Unreachable Card -->
+        <div
+          v-if="botStatus.status === 'offline'"
+          class="rounded-2xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/70 dark:bg-amber-950/20 p-5 text-center space-y-3"
+        >
+          <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center text-xl shadow-xs">
+            <i class="fa-solid fa-cloud-slash"></i>
+          </div>
+          <div class="space-y-1">
+            <h4 class="font-bold text-sm text-slate-800 dark:text-slate-100">WhatsApp Sync Service Offline</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-relaxed">
+              The WhatsApp bridge is not reachable right now. Retrying connection in background...
+            </p>
+          </div>
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-bold transition-all shadow-sm cursor-pointer"
+            @click="loadData"
+          >
+            <i class="fa-solid fa-rotate"></i>
+            <span>Retry Connection</span>
+          </button>
+        </div>
+
+        <template v-else>
+          <!-- Mode Toggle Tabs (Phone Number vs QR Code) -->
+          <div class="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/50">
           <button
             type="button"
             class="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all"
@@ -681,6 +706,7 @@ async function handleRemove() {
             <p class="text-xs">Preparing QR code...</p>
           </div>
         </div>
+        </template>
 
       </div>
 

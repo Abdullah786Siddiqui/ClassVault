@@ -17,6 +17,7 @@ import AddItemSheet from '../components/domain/AddItemSheet.vue'
 import ItemViewer from '../components/domain/ItemViewer.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import WhatsAppSyncModal from '../components/domain/WhatsAppSyncModal.vue'
 import { FileText, Camera, UploadCloud } from '../components/ui/icons.js'
 
 const route = useRoute()
@@ -31,6 +32,7 @@ const isAddSheetOpen = ref(false)
 const viewingItem = ref(null)
 const itemToDelete = ref(null)
 const loadError = ref('')
+const isWhatsAppOpen = ref(false)
 
 async function loadSubjectPage() {
   loadError.value = ''
@@ -211,6 +213,19 @@ function openViewer(item) {
           </span>
         </div>
       </template>
+
+      <!-- WhatsApp Link Button in page header -->
+      <template #actions>
+        <button
+          type="button"
+          title="Link a WhatsApp group to auto-save files here"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-400/40 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 hover:border-emerald-500 transition-all"
+          @click="isWhatsAppOpen = true"
+        >
+          <i class="fa-brands fa-whatsapp text-base text-emerald-500"></i>
+          <span>Link WhatsApp</span>
+        </button>
+      </template>
     </PageHeader>
 
     <div v-if="loadError" class="mx-auto mt-8 max-w-lg rounded-2xl border border-rose-200 bg-rose-50 p-5 text-center dark:border-rose-900/50 dark:bg-rose-950/20" role="alert">
@@ -335,6 +350,17 @@ function openViewer(item) {
       confirm-variant="danger"
       @confirm="confirmDeleteItem"
       @cancel="itemToDelete = null"
+    />
+
+    <!-- WhatsApp Group Link Modal -->
+    <WhatsAppSyncModal
+      :open="isWhatsAppOpen"
+      :semester-id="route.params.semesterId"
+      :subject-id="route.params.subjectId"
+      :exam="route.params.exam"
+      :semester-name="semester?.name || ''"
+      :subject-name="subject?.name || ''"
+      @close="isWhatsAppOpen = false"
     />
   </div>
 </template>

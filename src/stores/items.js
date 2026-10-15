@@ -47,16 +47,18 @@ export const useItemStore = defineStore('items', {
 
       try {
         const userEmail = getStoredUserEmail()
+        if (!userEmail) {
+          this.items = []
+          return []
+        }
+
         const rawItems = await db.items
           .where('[semesterId+subjectId+exam]')
           .equals([Number(semesterId), Number(subjectId), exam])
           .reverse()
           .sortBy('createdAt')
 
-        const filtered = userEmail
-          ? rawItems.filter((i) => !i.userEmail || i.userEmail === userEmail)
-          : rawItems.filter((i) => !i.userEmail)
-
+        const filtered = rawItems.filter((i) => i.userEmail === userEmail)
         this.items = filtered.map(wrapItemBlobs)
         return this.items
       } finally {

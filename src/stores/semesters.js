@@ -12,6 +12,7 @@ import {
   renameDriveFolderPath,
   getStoredUserEmail,
 } from '../services/drive'
+import { hasPreviouslyConnected } from '../services/auth'
 
 async function removeItemsLocally(items) {
   for (const item of items) {
@@ -44,20 +45,24 @@ export const useSemesterStore = defineStore('semester', {
     async load() {
       this.loading = true
       try {
+        const isConnected = await hasPreviouslyConnected()
         const userEmail = getStoredUserEmail()
+
+        // When disconnected or not linked to any drive account, do NOT show any data!
+        if (!isConnected || !userEmail) {
+          this.semesters = []
+          this.subjects = []
+          return
+        }
+
         const [rawSemesters, rawSubjects] = await Promise.all([
           db.semesters.orderBy('createdAt').reverse().toArray(),
           db.subjects.orderBy('createdAt').toArray(),
         ])
 
-        // Filter data for the active Google account (multi-account isolation)
-        const filteredSemesters = userEmail
-          ? rawSemesters.filter((sem) => !sem.userEmail || sem.userEmail === userEmail)
-          : rawSemesters.filter((sem) => !sem.userEmail)
-
-        const filteredSubjects = userEmail
-          ? rawSubjects.filter((sub) => !sub.userEmail || sub.userEmail === userEmail)
-          : rawSubjects.filter((sub) => !sub.userEmail)
+        // Strictly show only the connected Google account's data
+        const filteredSemesters = rawSemesters.filter((sem) => sem.userEmail === userEmail)
+        const filteredSubjects = rawSubjects.filter((sub) => sub.userEmail === userEmail)
 
         this.semesters = filteredSemesters.map((sem) => ({
           ...sem,

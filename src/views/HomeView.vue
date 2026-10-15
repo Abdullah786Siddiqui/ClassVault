@@ -121,8 +121,8 @@ async function confirmDeleteSemester() {
       </div>
     </section>
 
-    <!-- Semesters Section Header & Search -->
-    <div class="mb-5 flex flex-col gap-3">
+    <!-- Semesters Section Header & Search (ONLY when Drive connected!) -->
+    <div v-if="authStore.canAddData" class="mb-5 flex flex-col gap-3">
       <!-- Title + Add Semester Button in ONE Row on mobile and desktop -->
       <div class="flex items-center justify-between gap-3">
         <div class="min-w-0 flex-1">
@@ -160,51 +160,9 @@ async function confirmDeleteSemester() {
       </div>
     </div>
 
-    <div v-if="isLoading" class="flex min-h-48 items-center justify-center" role="status" aria-live="polite">
-      <span class="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></span>
-      <span class="sr-only">Loading semesters</span>
-    </div>
-    <div v-else-if="loadError" class="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-center dark:border-rose-900/50 dark:bg-rose-950/20" role="alert">
-      <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">{{ loadError }}</p>
-      <BaseButton variant="secondary" size="sm" class="mt-3" @click="loadHome">Try again</BaseButton>
-    </div>
-
-    <!-- Semester Grid -->
+    <!-- 1. Google Drive Not Connected: Show ONLY the Onboarding Gate! -->
     <div
-      v-else-if="filteredSemesters.length"
-      class="grid gap-4 sm:grid-cols-2"
-    >
-      <SemesterCard
-        v-for="semester in filteredSemesters"
-        :key="semester.id"
-        :semester="semester"
-        :subject-count="semesterStore.getSubjectsForSemester(semester.id).length"
-        @open="openSemester"
-        @delete="promptDeleteSemester"
-      />
-    </div>
-
-    <!-- Filtered Empty State -->
-    <div
-      v-else-if="semesterStore.semesters.length && !filteredSemesters.length"
-      class="rounded-3xl border border-slate-200 bg-white p-8 text-center dark:border-slate-800 dark:bg-slate-900"
-    >
-      <p class="text-sm font-semibold text-slate-600 dark:text-slate-300">
-        No semesters matching "{{ searchQuery }}"
-      </p>
-      <BaseButton
-        variant="ghost"
-        size="sm"
-        class="mt-3"
-        @click="searchQuery = ''"
-      >
-        Clear filter
-      </BaseButton>
-    </div>
-
-    <!-- Google Drive Not Connected Onboarding Gate -->
-    <div
-      v-else-if="!authStore.canAddData"
+      v-if="!authStore.canAddData"
       class="rounded-3xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 p-6 sm:p-10 text-center shadow-sm dark:border-indigo-900/40 dark:from-slate-900 dark:via-slate-900/80 dark:to-indigo-950/20 space-y-4"
     >
       <div class="w-16 h-16 mx-auto rounded-3xl bg-indigo-600 text-white flex items-center justify-center text-2xl shadow-lg shadow-indigo-600/30">
@@ -232,7 +190,52 @@ async function confirmDeleteSemester() {
       </div>
     </div>
 
-    <!-- Empty State (When Drive connected but 0 semesters) -->
+    <!-- 2. Loading State -->
+    <div v-else-if="isLoading" class="flex min-h-48 items-center justify-center" role="status" aria-live="polite">
+      <span class="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></span>
+      <span class="sr-only">Loading semesters</span>
+    </div>
+
+    <!-- 3. Error State -->
+    <div v-else-if="loadError" class="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-center dark:border-rose-900/50 dark:bg-rose-950/20" role="alert">
+      <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">{{ loadError }}</p>
+      <BaseButton variant="secondary" size="sm" class="mt-3" @click="loadHome">Try again</BaseButton>
+    </div>
+
+    <!-- 4. Semester Grid -->
+    <div
+      v-else-if="filteredSemesters.length"
+      class="grid gap-4 sm:grid-cols-2"
+    >
+      <SemesterCard
+        v-for="semester in filteredSemesters"
+        :key="semester.id"
+        :semester="semester"
+        :subject-count="semesterStore.getSubjectsForSemester(semester.id).length"
+        @open="openSemester"
+        @delete="promptDeleteSemester"
+      />
+    </div>
+
+    <!-- 5. Filtered Empty State -->
+    <div
+      v-else-if="semesterStore.semesters.length && !filteredSemesters.length"
+      class="rounded-3xl border border-slate-200 bg-white p-8 text-center dark:border-slate-800 dark:bg-slate-900"
+    >
+      <p class="text-sm font-semibold text-slate-600 dark:text-slate-300">
+        No semesters matching "{{ searchQuery }}"
+      </p>
+      <BaseButton
+        variant="ghost"
+        size="sm"
+        class="mt-3"
+        @click="searchQuery = ''"
+      >
+        Clear filter
+      </BaseButton>
+    </div>
+
+    <!-- 6. Empty State (When Drive connected but 0 semesters) -->
     <EmptyState
       v-else
       :icon="GraduationCap"

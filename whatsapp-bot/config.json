@@ -1,48 +1,5 @@
 {
-  "mappings": [
-    {
-      "groupName": "Calculus 101",
-      "semester": "Semester 1",
-      "exam": "Midterm",
-      "subject": "Calculus"
-    },
-    {
-      "groupName": "Operating Systems",
-      "semester": "Semester 1",
-      "exam": "Midterm",
-      "subject": "Operating Systems"
-    },
-    {
-      "groupName": "Data Structures",
-      "semester": "Semester 1",
-      "exam": "Midterm",
-      "subject": "Data Structures"
-    },
-    {
-      "groupId": "120363284065738828@g.us",
-      "groupName": "Volta Team Group 1",
-      "subjectId": 1,
-      "semesterId": 1,
-      "semester": "Semester 1",
-      "exam": "mid-term",
-      "subject": "Biology",
-      "allowImages": true,
-      "allowFiles": true,
-      "allowText": true
-    },
-    {
-      "groupId": "120363413096694684@g.us",
-      "groupName": "Class vault Testing",
-      "subjectId": 2,
-      "semesterId": 1,
-      "semester": "Semester 1",
-      "exam": "mid-term",
-      "subject": "Math",
-      "allowImages": true,
-      "allowFiles": true,
-      "allowText": false
-    }
-  ],
+  "mappings": [],
   "saveLocalBackup": true,
   "localBackupDir": "./downloads"
 }

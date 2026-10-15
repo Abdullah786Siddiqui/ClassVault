@@ -34,9 +34,85 @@ function getClientId() {
   return import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 }
 
+const STORAGE_ACCOUNT_KEY = 'classvault.userAccount'
+
+export async function fetchGoogleUserProfile(accessToken) {
+  if (!accessToken) return null
+  try {
+    const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (data?.user) {
+        const account = {
+          email: data.user.emailAddress || '',
+          name: data.user.displayName || '',
+          photo: data.user.photoLink || '',
+          id: data.user.permissionId || '',
+        }
+        await setStoredUserAccount(account)
+        return account
+      }
+    }
+  } catch (err) {
+    console.warn('[ClassVault Drive] Failed to fetch user profile:', err)
+  }
+  return null
+}
+
+export function getStoredUserAccount() {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(STORAGE_ACCOUNT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export async function setStoredUserAccount(account) {
+  if (!account || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(STORAGE_ACCOUNT_KEY, JSON.stringify(account))
+    if (account.email) {
+      window.localStorage.setItem(STORAGE_EMAIL_KEY, account.email)
+    }
+  } catch {}
+  try {
+    await db.settings.put({ key: STORAGE_ACCOUNT_KEY, value: JSON.stringify(account) })
+    if (account.email) {
+      await db.settings.put({ key: STORAGE_EMAIL_KEY, value: account.email })
+    }
+  } catch {}
+}
+
+export async function clearStoredAuth() {
+  tokenState.accessToken = ''
+  tokenState.expiresAt = 0
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem(STORAGE_TOKEN_KEY)
+      window.localStorage.removeItem('classvault.driveExpiresAt')
+      window.sessionStorage.removeItem(STORAGE_TOKEN_KEY)
+      window.localStorage.removeItem(STORAGE_ACCOUNT_KEY)
+      window.localStorage.removeItem(STORAGE_EMAIL_KEY)
+    } catch {}
+  }
+  try {
+    await db.settings.delete(DRIVE_TOKEN_SETTING)
+    await db.settings.delete('hasConnectedGoogle')
+    await db.settings.delete(STORAGE_ACCOUNT_KEY)
+    await db.settings.delete(STORAGE_EMAIL_KEY)
+  } catch {}
+  await resetDriveFolderCache()
+}
+
 export function getStoredUserEmail() {
   if (typeof window === 'undefined') return ''
   try {
+    const account = getStoredUserAccount()
+    if (account?.email) return account.email
     return window.localStorage.getItem(STORAGE_EMAIL_KEY) || window.sessionStorage.getItem(STORAGE_EMAIL_KEY) || ''
   } catch {
     return ''
@@ -318,7 +394,7 @@ export async function ensureGoogleAvailable() {
   }
 }
 
-export async function requestDriveAccessToken({ prompt, forcePrompt = false, loginHint } = {}) {
+export async function requestDriveAccessToken({ prompt, forcePrompt = false, loginHint, selectAccount = false } = {}) {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return { ok: false, message: 'Google Drive is unavailable while you are offline.' }
   }
@@ -332,7 +408,9 @@ export async function requestDriveAccessToken({ prompt, forcePrompt = false, log
   const emailHint = loginHint || getStoredUserEmail()
 
   let promptValue = ''
-  if (prompt !== undefined) {
+  if (selectAccount) {
+    promptValue = 'select_account'
+  } else if (prompt !== undefined) {
     promptValue = prompt
   } else if (forcePrompt) {
     promptValue = 'consent'

@@ -68,6 +68,25 @@ async function handleCreateSemester() {
   }
 }
 
+async function handleConnectDrive() {
+  const result = await authStore.connectGoogle()
+  if (result.ok) {
+    toast.success('Google Drive connected!')
+    await loadHome()
+  } else {
+    toast.error(result.message || 'Could not connect Google Drive')
+  }
+}
+
+function openAddSemester() {
+  if (!authStore.canAddData) {
+    toast.info('Please connect your Google Drive first.')
+    handleConnectDrive()
+    return
+  }
+  isAddSheetOpen.value = true
+}
+
 function promptDeleteSemester(semester) {
   semesterToDelete.value = semester
 }
@@ -118,8 +137,8 @@ async function confirmDeleteSemester() {
         <BaseButton
           variant="primary"
           size="sm"
-          class="shrink-0 whitespace-nowrap"
-          @click="isAddSheetOpen = true"
+          class="shrink-0 whitespace-nowrap cursor-pointer"
+          @click="openAddSemester"
         >
           <Plus class="h-4 w-4" />
           <span>Add semester</span>
@@ -183,14 +202,44 @@ async function confirmDeleteSemester() {
       </BaseButton>
     </div>
 
-    <!-- Empty State -->
+    <!-- Google Drive Not Connected Onboarding Gate -->
+    <div
+      v-else-if="!authStore.canAddData"
+      class="rounded-3xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 p-6 sm:p-10 text-center shadow-sm dark:border-indigo-900/40 dark:from-slate-900 dark:via-slate-900/80 dark:to-indigo-950/20 space-y-4"
+    >
+      <div class="w-16 h-16 mx-auto rounded-3xl bg-indigo-600 text-white flex items-center justify-center text-2xl shadow-lg shadow-indigo-600/30">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
+      </div>
+      <div class="space-y-1.5 max-w-md mx-auto">
+        <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100">
+          Connect Google Drive to Start
+        </h3>
+        <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+          ClassVault stores all your semester notes, board photos, and handouts directly in your personal Google Drive so you never lose them. Please connect once to get started.
+        </p>
+      </div>
+      <div class="pt-2">
+        <BaseButton
+          variant="primary"
+          size="lg"
+          class="bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-600/25 px-6 py-3 rounded-2xl font-bold inline-flex items-center gap-2 cursor-pointer"
+          :disabled="authStore.reconnecting"
+          @click="handleConnectDrive"
+        >
+          <i class="fa-brands fa-google mr-1"></i>
+          <span>{{ authStore.reconnecting ? 'Connecting...' : 'Connect Google Drive' }}</span>
+        </BaseButton>
+      </div>
+    </div>
+
+    <!-- Empty State (When Drive connected but 0 semesters) -->
     <EmptyState
       v-else
       :icon="GraduationCap"
       title="No semesters added yet"
       description="Create your first semester to organize subjects, lecture notes, board photos, and handouts."
       action-label="Create your first semester"
-      @action="isAddSheetOpen = true"
+      @action="openAddSemester"
     />
 
     <!-- Add Semester BottomSheet -->

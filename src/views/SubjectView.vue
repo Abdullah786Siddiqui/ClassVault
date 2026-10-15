@@ -152,6 +152,11 @@ const tabs = computed(() => [
 ])
 
 async function handleSaveItem(payload) {
+  if (!authStore.canAddData) {
+    toast.error('Please connect your Google Drive first.')
+    return
+  }
+
   try {
     const payloads = (Array.isArray(payload) ? payload : [payload]).map((item) => ({
       ...item,

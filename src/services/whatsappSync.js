@@ -1,5 +1,6 @@
 import db from './db'
 import { getWhatsAppInbox, ackWhatsAppInbox } from './whatsapp'
+import { getStoredUserEmail } from './drive'
 import { markRaw } from 'vue'
 
 function base64ToBlob(base64, mimeType) {
@@ -86,6 +87,7 @@ export async function syncIncomingWhatsAppItems(onItemImported) {
             })
             record = { ...existingNote, text: combined, updatedAt: now }
           } else {
+            const userEmail = getStoredUserEmail() || ''
             const newNote = {
               semesterId: Number(item.semesterId),
               subjectId: Number(item.subjectId),
@@ -102,6 +104,7 @@ export async function syncIncomingWhatsAppItems(onItemImported) {
               starred: 0,
               syncStatus: 'pending',
               driveFileId: null,
+              userEmail,
               errorMessage: '',
               retryAt: 0,
               retryCount: 0,
@@ -142,6 +145,7 @@ export async function syncIncomingWhatsAppItems(onItemImported) {
           ? 'photo' 
           : (item.type === 'file' ? 'file' : 'text')
 
+        const userEmail = getStoredUserEmail() || ''
         const record = {
           semesterId: Number(item.semesterId),
           subjectId: Number(item.subjectId),
@@ -158,6 +162,7 @@ export async function syncIncomingWhatsAppItems(onItemImported) {
           starred: 0,
           syncStatus: 'pending',
           driveFileId: null,
+          userEmail,
           errorMessage: '',
           retryAt: 0,
           retryCount: 0,

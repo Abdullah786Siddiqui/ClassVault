@@ -9,6 +9,7 @@ import { registerBackgroundSync } from '../../services/backgroundSync'
 import { requestNotificationPermission } from '../../services/notifications'
 import ToastHost from '../ui/ToastHost.vue'
 import BaseButton from '../ui/BaseButton.vue'
+import BottomSheet from '../ui/BottomSheet.vue'
 import { BookOpen, Download } from '../ui/icons.js'
 import { syncIncomingWhatsAppItems } from '../../services/whatsappSync'
 
@@ -25,6 +26,7 @@ const authStore = useAuthStore()
 const syncStore = useSyncStore()
 const { isDark, toggleTheme, initTheme } = useTheme()
 
+const isAccountSheetOpen = ref(false)
 const pendingCount = computed(() => syncStore.pendingCount)
 
 const syncIconClass = computed(() => {
@@ -40,15 +42,13 @@ const syncTooltip = computed(() => {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return `${pendingCount.value} item(s) saved on this device (offline)`
   }
-  if (!authStore.signedIn) {
-    return pendingCount.value > 0
-      ? `${pendingCount.value} items saved on device · Tap to sync with Drive`
-      : 'Connect Google Drive'
+  if (!authStore.hasConnectedBefore) {
+    return 'Connect Google Drive'
   }
   if (pendingCount.value > 0) {
-    return `${pendingCount.value} items waiting to sync · Tap to sync now`
+    return `${pendingCount.value} items waiting to sync · Tap to manage Drive`
   }
-  return 'All notes & files are synced to Google Drive'
+  return 'Google Drive connected · Tap to view account'
 })
 
 const syncStatusLabel = computed(() => {
@@ -59,16 +59,11 @@ const syncStatusLabel = computed(() => {
 })
 
 async function handleSyncClick() {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    toast.info(
-      pendingCount.value > 0
-        ? `${pendingCount.value} item(s) saved safely on device. Will sync when online.`
-        : 'You are offline. Notes & photos are safely saved on this device.',
-    )
-    return
-  }
-
-  if (!authStore.signedIn) {
+  if (!authStore.hasConnectedBefore) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      toast.info('You are offline. Connect to the internet to set up Google Drive.')
+      return
+    }
     toast.info('Connecting to Google Drive...')
     const result = await authStore.connectGoogle()
     if (result.ok) {
@@ -79,6 +74,14 @@ async function handleSyncClick() {
     return
   }
 
+  isAccountSheetOpen.value = true
+}
+
+async function handleManualSync() {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    toast.info('You are offline. Items will automatically sync when online.')
+    return
+  }
   try {
     requestNotificationPermission().catch(() => undefined)
     toast.info(pendingCount.value > 0 ? `Syncing ${pendingCount.value} item(s) to Drive...` : 'Checking Google Drive...')
@@ -95,6 +98,23 @@ async function handleSyncClick() {
   } catch (err) {
     toast.error(err?.message || 'Error during sync')
   }
+}
+
+async function handleSwitchAccount() {
+  toast.info('Opening Google account picker...')
+  const result = await authStore.switchAccount()
+  if (result?.ok) {
+    toast.success(`Switched account to ${authStore.user?.email || 'Google Drive'}!`)
+    isAccountSheetOpen.value = false
+  } else {
+    toast.error(result?.message || 'Account switch cancelled or failed')
+  }
+}
+
+async function handleDisconnectAccount() {
+  await authStore.disconnect()
+  toast.info('Google Drive disconnected.')
+  isAccountSheetOpen.value = false
 }
 
 onMounted(async () => {
@@ -261,6 +281,95 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
         <span>Install</span>
       </button>
     </nav>
+
+    <!-- Google Drive Account Management Modal -->
+    <BottomSheet
+      :open="isAccountSheetOpen"
+      title="Google Drive Storage"
+      @close="isAccountSheetOpen = false"
+    >
+      <div class="space-y-4 py-1">
+        <!-- Account Card -->
+        <div class="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/80 to-purple-50/50 dark:from-slate-800/80 dark:to-indigo-950/20 border border-indigo-200/60 dark:border-indigo-800/40 space-y-3">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xl shrink-0 overflow-hidden font-bold">
+              <img
+                v-if="authStore.user?.photo"
+                :src="authStore.user.photo"
+                alt="Google Avatar"
+                class="w-full h-full object-cover"
+                referrerpolicy="no-referrer"
+              />
+              <i v-else class="fa-brands fa-google"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="font-bold text-sm text-slate-800 dark:text-slate-100 truncate">
+                {{ authStore.user?.name || 'ClassVault User' }}
+              </p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 truncate">
+                {{ authStore.user?.email || 'Connected Google Drive' }}
+              </p>
+            </div>
+            <span
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0"
+              :class="authStore.signedIn
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" :class="authStore.signedIn ? 'bg-emerald-500' : 'bg-amber-500'"></span>
+              <span>{{ authStore.signedIn ? 'Connected' : 'Offline Ready' }}</span>
+            </span>
+          </div>
+
+          <!-- Vault Storage Info -->
+          <div class="grid grid-cols-2 gap-2 pt-2 border-t border-indigo-100 dark:border-indigo-900/30 text-xs">
+            <div class="p-2.5 rounded-xl bg-white/70 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800">
+              <p class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Waiting to Sync</p>
+              <p class="font-extrabold text-sm text-slate-700 dark:text-slate-200 mt-0.5">
+                {{ pendingCount }} {{ pendingCount === 1 ? 'item' : 'items' }}
+              </p>
+            </div>
+            <div class="p-2.5 rounded-xl bg-white/70 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800">
+              <p class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Vault Status</p>
+              <p class="font-extrabold text-sm text-slate-700 dark:text-slate-200 mt-0.5 truncate">
+                {{ pendingCount > 0 ? 'Uploads queued' : 'All synced' }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sync Now Action -->
+        <BaseButton
+          variant="primary"
+          class="w-full bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 py-2.5 rounded-xl font-bold cursor-pointer"
+          :disabled="syncStore.isSyncing"
+          @click="handleManualSync"
+        >
+          <i class="fa-solid" :class="syncStore.isSyncing ? 'fa-arrows-rotate fa-spin' : 'fa-cloud-arrow-up'"></i>
+          <span class="ml-2">{{ syncStore.isSyncing ? 'Syncing...' : 'Sync Now with Drive' }}</span>
+        </BaseButton>
+
+        <!-- Switch Account Button -->
+        <button
+          type="button"
+          class="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold transition-all cursor-pointer"
+          :disabled="authStore.reconnecting"
+          @click="handleSwitchAccount"
+        >
+          <i class="fa-solid fa-arrows-split-up-and-left text-indigo-500"></i>
+          <span>{{ authStore.reconnecting ? 'Opening Google...' : 'Switch Google Account' }}</span>
+        </button>
+
+        <!-- Disconnect Button -->
+        <button
+          type="button"
+          class="w-full text-center py-2 text-xs font-medium text-rose-500 hover:text-rose-600 hover:underline cursor-pointer"
+          @click="handleDisconnectAccount"
+        >
+          Disconnect Google Drive
+        </button>
+      </div>
+    </BottomSheet>
   </div>
 </template>
 

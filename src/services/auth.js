@@ -4,6 +4,8 @@ import {
   getDriveAccessToken,
   googleClientIdConfigured,
   requestDriveAccessToken,
+  fetchGoogleUserProfile,
+  clearStoredAuth,
 } from './drive'
 
 const SETTING_CONNECTED = 'hasConnectedGoogle'
@@ -37,7 +39,7 @@ export async function setPreviouslyConnected(connected) {
   })
 }
 
-export async function connectGoogleDrive({ forcePrompt = false } = {}) {
+export async function connectGoogleDrive({ forcePrompt = false, selectAccount = false } = {}) {
   if (!googleClientIdConfigured()) {
     return {
       ok: false,
@@ -50,19 +52,34 @@ export async function connectGoogleDrive({ forcePrompt = false } = {}) {
     return googleReady
   }
 
-  const tokenResult = await requestDriveAccessToken({ forcePrompt })
+  const tokenResult = await requestDriveAccessToken({ forcePrompt, selectAccount })
   if (!tokenResult.ok) {
     return tokenResult
   }
 
-  // Remember that the student has connected before (Fixes B13)
+  // Remember that the student has connected before
   await setPreviouslyConnected(true)
+
+  // Fetch the Google account profile (displayName, emailAddress, photoLink)
+  const userProfile = await fetchGoogleUserProfile(tokenResult.accessToken)
 
   return {
     ok: true,
     message: 'Google Drive is connected and ready to sync.',
     accessToken: tokenResult.accessToken,
+    user: userProfile,
   }
+}
+
+export async function switchGoogleDriveAccount() {
+  await clearStoredAuth()
+  return await connectGoogleDrive({ forcePrompt: true, selectAccount: true })
+}
+
+export async function disconnectGoogleDrive() {
+  await clearStoredAuth()
+  await setPreviouslyConnected(false)
+  return { ok: true }
 }
 
 export async function ensureGoogleSignedIn({ forceRefresh = false } = {}) {

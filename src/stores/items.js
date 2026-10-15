@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import db from '../services/db'
 import { sanitizeFileName } from '../utils/sanitize'
-import { getDriveAccessToken, deleteDriveFile } from '../services/drive'
+import { getDriveAccessToken, deleteDriveFile, getStoredUserEmail } from '../services/drive'
 
 /**
  * Helper to wrap any binary blobs with markRaw so Vue's reactivity system
@@ -46,13 +46,18 @@ export const useItemStore = defineStore('items', {
       }
 
       try {
+        const userEmail = getStoredUserEmail()
         const rawItems = await db.items
           .where('[semesterId+subjectId+exam]')
           .equals([Number(semesterId), Number(subjectId), exam])
           .reverse()
           .sortBy('createdAt')
 
-        this.items = rawItems.map(wrapItemBlobs)
+        const filtered = userEmail
+          ? rawItems.filter((i) => !i.userEmail || i.userEmail === userEmail)
+          : rawItems.filter((i) => !i.userEmail)
+
+        this.items = filtered.map(wrapItemBlobs)
         return this.items
       } finally {
         this.loading = false
@@ -141,6 +146,7 @@ export const useItemStore = defineStore('items', {
 
           const blob = payload.blob ? markRaw(payload.blob) : null
           const thumbBlob = payload.thumbBlob ? markRaw(payload.thumbBlob) : null
+          const userEmail = getStoredUserEmail()
           additions.push({
             semesterId,
             subjectId,
@@ -157,6 +163,7 @@ export const useItemStore = defineStore('items', {
             starred: Number(Boolean(payload.starred)),
             syncStatus: 'pending',
             driveFileId: null,
+            userEmail: userEmail || '',
             errorMessage: '',
             retryAt: 0,
             retryCount: 0,

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSemesterStore } from '../stores/semesters'
+import { useAuthStore } from '../stores/auth'
 import { useToast } from '../composables/useToast'
 import PageHeader from '../components/ui/PageHeader.vue'
 import ExamCard from '../components/domain/ExamCard.vue'
@@ -15,6 +16,7 @@ import { Plus, BookOpen, Calendar, Folder } from '../components/ui/icons.js'
 const route = useRoute()
 const router = useRouter()
 const semesterStore = useSemesterStore()
+const authStore = useAuthStore()
 const toast = useToast()
 
 const subjectName = ref('')
@@ -68,6 +70,11 @@ async function handleAddTerm() {
   const name = newTermName.value.trim()
   if (!name) return
 
+  if (!authStore.canAddData) {
+    toast.error('Please connect your Google Drive first.')
+    return
+  }
+
   isCreatingTerm.value = true
   try {
     await semesterStore.addExamToSemester(route.params.semesterId, name)
@@ -101,6 +108,11 @@ async function confirmDeleteTerm() {
 async function handleAddSubject() {
   const name = subjectName.value.trim()
   if (!name) return
+
+  if (!authStore.canAddData) {
+    toast.error('Please connect your Google Drive first.')
+    return
+  }
 
   isSavingSubject.value = true
   try {

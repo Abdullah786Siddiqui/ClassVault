@@ -6,7 +6,12 @@ import {
   isDuplicateSemesterName,
   isDuplicateSubjectName,
 } from '../utils/sanitize'
-import { getDriveAccessToken, deleteDriveFile, renameDriveFolderPath } from '../services/drive'
+import {
+  getDriveAccessToken,
+  deleteDriveFile,
+  renameDriveFolderPath,
+  getStoredUserEmail,
+} from '../services/drive'
 
 async function removeItemsLocally(items) {
   for (const item of items) {
@@ -39,15 +44,26 @@ export const useSemesterStore = defineStore('semester', {
     async load() {
       this.loading = true
       try {
-        const [rawSemesters, subjects] = await Promise.all([
+        const userEmail = getStoredUserEmail()
+        const [rawSemesters, rawSubjects] = await Promise.all([
           db.semesters.orderBy('createdAt').reverse().toArray(),
           db.subjects.orderBy('createdAt').toArray(),
         ])
-        this.semesters = rawSemesters.map((sem) => ({
+
+        // Filter data for the active Google account (multi-account isolation)
+        const filteredSemesters = userEmail
+          ? rawSemesters.filter((sem) => !sem.userEmail || sem.userEmail === userEmail)
+          : rawSemesters.filter((sem) => !sem.userEmail)
+
+        const filteredSubjects = userEmail
+          ? rawSubjects.filter((sub) => !sub.userEmail || sub.userEmail === userEmail)
+          : rawSubjects.filter((sub) => !sub.userEmail)
+
+        this.semesters = filteredSemesters.map((sem) => ({
           ...sem,
           exams: Array.isArray(sem.exams) ? sem.exams : [],
         }))
-        this.subjects = subjects
+        this.subjects = filteredSubjects
       } finally {
         this.loading = false
       }
@@ -63,9 +79,11 @@ export const useSemesterStore = defineStore('semester', {
         throw new Error(`A semester named "${cleanName}" already exists`)
       }
 
+      const userEmail = getStoredUserEmail()
       const id = await db.semesters.add({
         name: cleanName,
-        exams: [], // Starts completely empty per user requirement
+        exams: [],
+        userEmail: userEmail || '',
         createdAt: new Date().toISOString(),
       })
 
@@ -174,9 +192,11 @@ export const useSemesterStore = defineStore('semester', {
         throw new Error(`A subject named "${cleanName}" already exists in this semester`)
       }
 
+      const userEmail = getStoredUserEmail()
       const id = await db.subjects.add({
         semesterId: Number(semesterId),
         name: cleanName,
+        userEmail: userEmail || '',
         createdAt: new Date().toISOString(),
       })
 

@@ -18,6 +18,7 @@ import ItemViewer from '../components/domain/ItemViewer.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 import WhatsAppSyncModal from '../components/domain/WhatsAppSyncModal.vue'
+import { getWhatsAppMappings } from '../services/whatsapp'
 import { FileText, Camera, UploadCloud } from '../components/ui/icons.js'
 
 const route = useRoute()
@@ -33,6 +34,25 @@ const viewingItem = ref(null)
 const itemToDelete = ref(null)
 const loadError = ref('')
 const isWhatsAppOpen = ref(false)
+const linkedGroup = ref(null)
+
+async function refreshWhatsAppMapping() {
+  try {
+    const res = await getWhatsAppMappings()
+    if (res?.ok && Array.isArray(res.mappings)) {
+      const match = res.mappings.find(
+        (m) =>
+          Number(m.subjectId) === Number(route.params.subjectId) ||
+          m.subject === subject.value?.name
+      )
+      linkedGroup.value = match || null
+    } else {
+      linkedGroup.value = null
+    }
+  } catch {
+    linkedGroup.value = null
+  }
+}
 
 async function loadSubjectPage() {
   loadError.value = ''
@@ -41,6 +61,7 @@ async function loadSubjectPage() {
       itemStore.loadSubjectItems(route.params.semesterId, route.params.subjectId, route.params.exam),
       semesterStore.load(),
       authStore.refreshPendingCount(),
+      refreshWhatsAppMapping(),
     ])
     if (!semester.value) {
       toast.error('Semester not found.')
@@ -217,13 +238,34 @@ function openViewer(item) {
       <!-- WhatsApp Link Button in page header -->
       <template #actions>
         <button
+          v-if="linkedGroup"
+          type="button"
+          title="Linked to WhatsApp group. Click to change or unlink."
+          class="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-200 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 hover:border-emerald-500 transition-all shadow-xs cursor-pointer max-w-full"
+          @click="isWhatsAppOpen = true"
+        >
+          <span class="relative flex h-2 w-2 shrink-0">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <i class="fa-brands fa-whatsapp text-emerald-600 dark:text-emerald-400 text-sm shrink-0"></i>
+          <span class="truncate max-w-[140px] sm:max-w-[200px]">
+            {{ linkedGroup.groupName }}
+          </span>
+          <span class="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 dark:bg-emerald-500/20 px-1.5 py-0.5 rounded-md shrink-0">
+            Change
+          </span>
+        </button>
+
+        <button
+          v-else
           type="button"
           title="Link a WhatsApp group to auto-save files here"
-          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-400/40 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 hover:border-emerald-500 transition-all"
+          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-400/40 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 hover:border-emerald-500 transition-all cursor-pointer shrink-0"
           @click="isWhatsAppOpen = true"
         >
           <i class="fa-brands fa-whatsapp text-base text-emerald-500"></i>
-          <span>Link WhatsApp</span>
+          <span>Link to WhatsApp</span>
         </button>
       </template>
     </PageHeader>
@@ -360,7 +402,8 @@ function openViewer(item) {
       :exam="route.params.exam"
       :semester-name="semester?.name || ''"
       :subject-name="subject?.name || ''"
-      @close="isWhatsAppOpen = false"
+      @updated="refreshWhatsAppMapping"
+      @close="refreshWhatsAppMapping(); isWhatsAppOpen = false"
     />
   </div>
 </template>

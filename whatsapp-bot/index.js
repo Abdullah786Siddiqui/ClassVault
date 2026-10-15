@@ -117,8 +117,7 @@ async function startBot() {
       try {
         botState.qr = await QRCode.toDataURL(qr, { margin: 2, scale: 8 })
         botState.status = 'qr_ready'
-        retryCount = 0  // reset on fresh QR
-        console.log('[Bot] QR ready — scan it from the ClassVault app!')
+        retryCount = 0
       } catch (e) {
         console.error('[Bot] QR generation error:', e.message)
       }

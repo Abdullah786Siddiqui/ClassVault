@@ -21,7 +21,7 @@ const props = defineProps({
   subjectName: { type: String, default: '' },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'updated'])
 const toast = useToast()
 
 /* ── State ───────────────────────────────────────── */
@@ -35,8 +35,9 @@ const allowText = ref(false)
 const isSaving = ref(false)
 const isInitialLoading = ref(true)
 const existingMapping = ref(null)
+const isChangingGroup = ref(false)
 
-// Pairing with phone number (Same-mobile flow)
+// Pairing state
 const pairingMode = ref('phone') // 'phone' | 'qr'
 const phoneNumber = ref('')
 const pairingCode = ref('')
@@ -75,6 +76,8 @@ async function loadData() {
           allowImages.value = match.allowImages !== false
           allowFiles.value = match.allowFiles !== false
           allowText.value = match.allowText === true
+        } else {
+          existingMapping.value = null
         }
       }
     }
@@ -101,6 +104,7 @@ function stopPolling() {
 
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
+    isChangingGroup.value = false
     selectedGroupId.value = ''
     selectedGroupName.value = ''
     existingMapping.value = null
@@ -122,7 +126,7 @@ onUnmounted(stopPolling)
 async function handleRequestPairingCode() {
   const raw = phoneNumber.value.trim().replace(/[^0-9]/g, '')
   if (!raw || raw.length < 9) {
-    pairingError.value = 'Please enter a valid phone number with country code (e.g. 03001234567 or 923001234567)'
+    pairingError.value = 'Please enter a valid phone number with country code (e.g. 923001234567 or 03001234567)'
     return
   }
 
@@ -150,8 +154,8 @@ function copyPairingCode() {
   const raw = pairingCode.value.replace(/[^a-zA-Z0-9]/g, '')
   navigator.clipboard.writeText(raw)
   hasCopiedCode.value = true
-  toast.success('Code copied! Open WhatsApp and paste it.')
-  setTimeout(() => { hasCopiedCode.value = false }, 3000)
+  toast.success('Code copied to clipboard!')
+  setTimeout(() => { hasCopiedCode.value = false }, 2500)
 }
 
 /* ── Group Selection ─────────────────────────────── */
@@ -193,6 +197,8 @@ async function handleSave() {
     if (res?.ok) {
       toast.success(`Connected "${selectedGroupName.value}" to ${props.subjectName}!`)
       existingMapping.value = allMappings[allMappings.length - 1]
+      isChangingGroup.value = false
+      emit('updated')
       emit('close')
     } else {
       toast.error(res?.error || 'Failed to save mapping.')
@@ -218,6 +224,8 @@ async function handleRemove() {
       existingMapping.value = null
       selectedGroupId.value = ''
       selectedGroupName.value = ''
+      isChangingGroup.value = false
+      emit('updated')
     }
   } catch (err) {
     toast.error(err.message)
@@ -229,16 +237,16 @@ async function handleRemove() {
 
 <template>
   <BottomSheet :open="open" title="Link WhatsApp to Vault" @close="emit('close')">
-    <div class="space-y-5 pb-5">
+    <div class="space-y-4 pb-4">
 
       <!-- Subject Target Header Badge -->
       <div class="flex items-center gap-3 p-3 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20">
-        <div class="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-          <i class="fa-solid fa-graduation-cap text-lg"></i>
+        <div class="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+          <i class="fa-solid fa-graduation-cap text-base"></i>
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-            Target Subject
+          <p class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+            Selected Subject
           </p>
           <p class="font-bold text-sm text-slate-800 dark:text-slate-100 truncate">
             {{ subjectName }} <span class="text-xs font-normal text-slate-400">&mdash; {{ semesterName }} ({{ exam }})</span>
@@ -249,84 +257,125 @@ async function handleRemove() {
       <!-- ══════════════════════════════════════════════ -->
       <!-- 1. INITIAL CONNECTING / CHECKING STATE         -->
       <!-- ══════════════════════════════════════════════ -->
-      <div v-if="isInitialLoading" class="py-12 flex flex-col items-center justify-center gap-3 text-center">
+      <div v-if="isInitialLoading" class="py-10 flex flex-col items-center justify-center gap-3 text-center">
         <div class="relative flex items-center justify-center">
-          <div class="w-14 h-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 text-2xl animate-pulse">
+          <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 text-xl animate-pulse">
             <i class="fa-brands fa-whatsapp"></i>
           </div>
-          <span class="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+          <span class="absolute -top-1 -right-1 flex h-3 w-3">
             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
           </span>
         </div>
         <div>
           <p class="font-bold text-sm text-slate-800 dark:text-slate-200">Connecting to WhatsApp...</p>
-          <p class="text-xs text-slate-400 mt-0.5">Checking linked device and groups</p>
+          <p class="text-xs text-slate-400 mt-0.5">Checking linked device status</p>
         </div>
       </div>
 
       <!-- ══════════════════════════════════════════════ -->
       <!-- 2. CONNECTED STATE (Dropdown + Checkboxes)     -->
       <!-- ══════════════════════════════════════════════ -->
-      <div v-else-if="isConnected" class="space-y-5">
+      <div v-else-if="isConnected" class="space-y-4">
         
-        <!-- Existing Connected Group Notification -->
+        <!-- Already Linked Group Card -->
         <div 
-          v-if="existingMapping" 
-          class="flex items-center justify-between gap-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300/40"
+          v-if="existingMapping && !isChangingGroup" 
+          class="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/25 border border-emerald-300/50 dark:border-emerald-800/40 space-y-3"
         >
-          <div class="flex items-center gap-2.5 min-w-0">
-            <i class="fa-solid fa-link text-emerald-500 text-sm shrink-0"></i>
-            <div class="min-w-0">
-              <span class="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 tracking-wide block">
-                Currently Linked
-              </span>
-              <span class="font-semibold text-xs text-emerald-900 dark:text-emerald-200 truncate block">
-                {{ existingMapping.groupName }}
-              </span>
+          <div class="flex items-start justify-between gap-2.5">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                <i class="fa-brands fa-whatsapp"></i>
+              </div>
+              <div class="min-w-0">
+                <span class="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 tracking-wider block">
+                  Connected Group
+                </span>
+                <span class="font-bold text-sm text-emerald-950 dark:text-emerald-100 truncate block">
+                  {{ existingMapping.groupName }}
+                </span>
+              </div>
             </div>
           </div>
-          <button
-            type="button"
-            class="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 font-semibold px-2 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors shrink-0"
-            :disabled="isSaving"
-            @click="handleRemove"
-          >
-            Disconnect
-          </button>
+
+          <!-- Active filters info -->
+          <div class="flex items-center gap-1.5 flex-wrap text-[11px]">
+            <span class="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-800/80 text-emerald-700 dark:text-emerald-300 font-medium border border-emerald-200/50 dark:border-emerald-800/40">
+              <i class="fa-solid fa-image text-[10px] mr-1"></i> Images: {{ allowImages ? 'Enabled' : 'Disabled' }}
+            </span>
+            <span class="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-800/80 text-emerald-700 dark:text-emerald-300 font-medium border border-emerald-200/50 dark:border-emerald-800/40">
+              <i class="fa-solid fa-file-lines text-[10px] mr-1"></i> Files: {{ allowFiles ? 'Enabled' : 'Disabled' }}
+            </span>
+            <span v-if="allowText" class="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-800/80 text-emerald-700 dark:text-emerald-300 font-medium border border-emerald-200/50 dark:border-emerald-800/40">
+              <i class="fa-solid fa-comment-dots text-[10px] mr-1"></i> Text: Enabled
+            </span>
+          </div>
+
+          <!-- Change or Disconnect Action Buttons -->
+          <div class="flex items-center gap-2 pt-1 border-t border-emerald-200/50 dark:border-emerald-800/30">
+            <button
+              type="button"
+              class="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-800 hover:bg-emerald-100/50 dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-300 text-xs font-bold border border-emerald-300/60 dark:border-emerald-700 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              @click="isChangingGroup = true"
+            >
+              <i class="fa-solid fa-arrows-rotate text-[11px]"></i>
+              <span>Change Group</span>
+            </button>
+            <button
+              type="button"
+              class="py-2 px-3 rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400 text-xs font-semibold border border-red-200 dark:border-red-900/40 transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+              :disabled="isSaving"
+              @click="handleRemove"
+            >
+              <i class="fa-solid fa-unlink text-[11px]"></i>
+              <span>Unlink</span>
+            </button>
+          </div>
         </div>
 
-        <!-- Group Selector via SearchableSelect -->
-        <div class="space-y-1.5">
-          <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Select WhatsApp Group
-          </label>
+        <!-- Group Selector (when linking first time OR when changing group) -->
+        <div v-if="!existingMapping || isChangingGroup" class="space-y-3">
+          <div class="flex items-center justify-between">
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {{ existingMapping ? 'Choose a New WhatsApp Group' : 'Select WhatsApp Group' }}
+            </label>
+            <button
+              v-if="isChangingGroup"
+              type="button"
+              class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-medium"
+              @click="isChangingGroup = false"
+            >
+              Cancel
+            </button>
+          </div>
+
           <SearchableSelect
             v-model="selectedGroupId"
             :options="groups"
             placeholder="Search and choose a group..."
-            search-placeholder="Type group name to search..."
+            search-placeholder="Search groups by name..."
             :loading="isInitialLoading"
             @select="handleGroupSelect"
           />
         </div>
 
-        <!-- 3 Content Types to Auto-Save -->
+        <!-- Auto-save content filters -->
         <div class="space-y-2">
           <p class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Auto-Save to this Subject:
           </p>
 
-          <div class="grid grid-cols-3 gap-2.5">
+          <div class="grid grid-cols-3 gap-2">
             <!-- 1. Images -->
             <label
-              class="flex flex-col items-center gap-2 p-3 rounded-xl border cursor-pointer select-none transition-all duration-150"
+              class="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border cursor-pointer select-none transition-all duration-150"
               :class="allowImages
                 ? 'bg-sky-50 dark:bg-sky-950/30 border-sky-400 text-sky-800 dark:text-sky-200 ring-1 ring-sky-400/30'
                 : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:border-slate-300'"
             >
               <div 
-                class="w-9 h-9 rounded-xl flex items-center justify-center text-lg transition-colors"
+                class="w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-colors"
                 :class="allowImages ? 'bg-sky-500 text-white shadow-xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'"
               >
                 <i class="fa-solid fa-image"></i>
@@ -334,22 +383,22 @@ async function handleRemove() {
               <span class="text-xs font-bold">Images</span>
               <input type="checkbox" v-model="allowImages" class="sr-only" />
               <div 
-                class="w-4 h-4 rounded-md border flex items-center justify-center transition-all"
+                class="w-3.5 h-3.5 rounded border flex items-center justify-center transition-all"
                 :class="allowImages ? 'bg-sky-500 border-sky-500 text-white' : 'border-slate-300 dark:border-slate-600'"
               >
-                <i v-if="allowImages" class="fa-solid fa-check text-[9px]"></i>
+                <i v-if="allowImages" class="fa-solid fa-check text-[8px]"></i>
               </div>
             </label>
 
             <!-- 2. Files / PDFs -->
             <label
-              class="flex flex-col items-center gap-2 p-3 rounded-xl border cursor-pointer select-none transition-all duration-150"
+              class="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border cursor-pointer select-none transition-all duration-150"
               :class="allowFiles
                 ? 'bg-violet-50 dark:bg-violet-950/30 border-violet-400 text-violet-800 dark:text-violet-200 ring-1 ring-violet-400/30'
                 : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:border-slate-300'"
             >
               <div 
-                class="w-9 h-9 rounded-xl flex items-center justify-center text-lg transition-colors"
+                class="w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-colors"
                 :class="allowFiles ? 'bg-violet-500 text-white shadow-xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'"
               >
                 <i class="fa-solid fa-file-lines"></i>
@@ -357,22 +406,22 @@ async function handleRemove() {
               <span class="text-xs font-bold">Files / PDF</span>
               <input type="checkbox" v-model="allowFiles" class="sr-only" />
               <div 
-                class="w-4 h-4 rounded-md border flex items-center justify-center transition-all"
+                class="w-3.5 h-3.5 rounded border flex items-center justify-center transition-all"
                 :class="allowFiles ? 'bg-violet-500 border-violet-500 text-white' : 'border-slate-300 dark:border-slate-600'"
               >
-                <i v-if="allowFiles" class="fa-solid fa-check text-[9px]"></i>
+                <i v-if="allowFiles" class="fa-solid fa-check text-[8px]"></i>
               </div>
             </label>
 
             <!-- 3. Text Messages -->
             <label
-              class="flex flex-col items-center gap-2 p-3 rounded-xl border cursor-pointer select-none transition-all duration-150"
+              class="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border cursor-pointer select-none transition-all duration-150"
               :class="allowText
                 ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 text-amber-800 dark:text-amber-200 ring-1 ring-amber-400/30'
                 : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:border-slate-300'"
             >
               <div 
-                class="w-9 h-9 rounded-xl flex items-center justify-center text-lg transition-colors"
+                class="w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-colors"
                 :class="allowText ? 'bg-amber-500 text-white shadow-xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'"
               >
                 <i class="fa-solid fa-comment-dots"></i>
@@ -380,31 +429,34 @@ async function handleRemove() {
               <span class="text-xs font-bold">Text Msgs</span>
               <input type="checkbox" v-model="allowText" class="sr-only" />
               <div 
-                class="w-4 h-4 rounded-md border flex items-center justify-center transition-all"
+                class="w-3.5 h-3.5 rounded border flex items-center justify-center transition-all"
                 :class="allowText ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 dark:border-slate-600'"
               >
-                <i v-if="allowText" class="fa-solid fa-check text-[9px]"></i>
+                <i v-if="allowText" class="fa-solid fa-check text-[8px]"></i>
               </div>
             </label>
           </div>
 
           <p class="text-[11px] text-slate-400 leading-normal pt-1">
             <i class="fa-solid fa-circle-info text-emerald-500 mr-1"></i>
-            Files sent in this group will automatically be stored under 
+            Files sent in the selected group will automatically be stored under 
             <strong class="text-slate-700 dark:text-slate-300">{{ subjectName }}</strong>.
           </p>
         </div>
 
-        <!-- Action Link Button -->
+        <!-- Action Link Button (visible when not already linked OR when editing) -->
         <BaseButton
+          v-if="!existingMapping || isChangingGroup"
           variant="primary"
-          class="w-full bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 py-3 rounded-xl"
+          class="w-full bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-600/20 py-3 rounded-xl font-bold"
           :disabled="!selectedGroupId || isSaving"
           @click="handleSave"
         >
           <i class="fa-brands fa-whatsapp text-lg mr-2"></i>
-          <span v-if="isSaving">Connecting...</span>
-          <span v-else-if="selectedGroupName">Link "{{ selectedGroupName }}" to {{ subjectName }}</span>
+          <span v-if="isSaving">Saving Connection...</span>
+          <span v-else-if="selectedGroupName">
+            {{ existingMapping ? `Update Link to "${selectedGroupName}"` : `Link "${selectedGroupName}" to ${subjectName}` }}
+          </span>
           <span v-else>Select a group to link</span>
         </BaseButton>
       </div>
@@ -425,7 +477,7 @@ async function handleRemove() {
             @click="pairingMode = 'phone'"
           >
             <i class="fa-solid fa-mobile-screen"></i>
-            <span>This Mobile (No Camera)</span>
+            <span>This Device (No Camera)</span>
           </button>
           <button
             type="button"
@@ -436,26 +488,26 @@ async function handleRemove() {
             @click="pairingMode = 'qr'"
           >
             <i class="fa-solid fa-qrcode"></i>
-            <span>Scan QR (Laptop / PC)</span>
+            <span>Scan QR Code</span>
           </button>
         </div>
 
         <!-- ────────────────────────────────────────── -->
         <!-- OPTION A: PAIR WITH PHONE NUMBER (SAME PHONE) -->
         <!-- ────────────────────────────────────────── -->
-        <div v-if="pairingMode === 'phone'" class="space-y-4">
+        <div v-if="pairingMode === 'phone'" class="space-y-3.5">
           <div class="text-center space-y-1">
             <h4 class="font-bold text-sm text-slate-800 dark:text-slate-100">
-              Link WhatsApp on this same phone
+              Link WhatsApp on this device
             </h4>
             <p class="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto">
-              Enter your WhatsApp number. WhatsApp will give you an 8-character code to link directly without scanning!
+              Enter your WhatsApp number to receive an 8-character code to link without a camera.
             </p>
           </div>
 
-          <!-- Phone Number Input & Button -->
+          <!-- Phone Number Input & Request Button -->
           <div v-if="!pairingCode" class="space-y-3">
-            <div class="space-y-1.5 text-left">
+            <div class="space-y-1 text-left">
               <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300">
                 WhatsApp Phone Number
               </label>
@@ -482,18 +534,18 @@ async function handleRemove() {
             >
               <i v-if="isRequestingCode" class="fa-solid fa-circle-notch fa-spin mr-1.5"></i>
               <i v-else class="fa-solid fa-key mr-1.5"></i>
-              <span>{{ isRequestingCode ? 'Generating Code...' : 'Get WhatsApp Pairing Code' }}</span>
+              <span>{{ isRequestingCode ? 'Generating Code...' : 'Get Pairing Code' }}</span>
             </BaseButton>
           </div>
 
           <!-- Generated Code Display -->
-          <div v-else class="space-y-4">
+          <div v-else class="space-y-3.5">
             <div class="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-300/50 text-center space-y-2">
               <span class="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest block">
-                Your 8-Digit Pairing Code
+                Pairing Code
               </span>
 
-              <div class="font-mono text-2xl font-black text-emerald-900 dark:text-emerald-100 tracking-widest select-all py-1">
+              <div class="font-mono text-2xl font-black text-emerald-950 dark:text-emerald-100 tracking-widest select-all py-0.5">
                 {{ pairingCode }}
               </div>
 
@@ -503,21 +555,21 @@ async function handleRemove() {
                 @click="copyPairingCode"
               >
                 <i class="fa-solid" :class="hasCopiedCode ? 'fa-check' : 'fa-copy'"></i>
-                <span>{{ hasCopiedCode ? 'Copied to Clipboard!' : 'Copy Code' }}</span>
+                <span>{{ hasCopiedCode ? 'Copied!' : 'Copy Code' }}</span>
               </button>
             </div>
 
-            <!-- Steps Instructions -->
-            <div class="text-left bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-xs text-slate-600 dark:text-slate-400 space-y-2">
+            <!-- Steps Instructions (Pure English) -->
+            <div class="text-left bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 text-xs text-slate-600 dark:text-slate-400 space-y-1.5">
               <p class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
                 <i class="fa-brands fa-whatsapp text-emerald-500 text-sm"></i>
-                Ab is phone par WhatsApp open karein:
+                Link directly inside WhatsApp:
               </p>
-              <ol class="list-decimal list-inside space-y-1.5 pl-1 leading-relaxed">
-                <li>Agar WhatsApp ka <strong>Notification</strong> aaya hai to uspe tap karein.</li>
-                <li>Ya WhatsApp me <strong>Settings &rarr; Linked Devices &rarr; Link a Device</strong> par jayein.</li>
-                <li>Niche <strong>"Link with phone number instead"</strong> par tap karein.</li>
-                <li>Upar diya gaya code daal dein!</li>
+              <ol class="list-decimal list-inside space-y-1 pl-1 leading-relaxed">
+                <li>Open <strong>WhatsApp</strong> on this device</li>
+                <li>Go to <strong>Settings</strong> &rarr; <strong>Linked Devices</strong> &rarr; <strong>Link a Device</strong></li>
+                <li>Tap <strong>"Link with phone number instead"</strong> at the bottom</li>
+                <li>Enter the 8-character pairing code shown above</li>
               </ol>
             </div>
 
@@ -531,7 +583,7 @@ async function handleRemove() {
                 class="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold"
                 @click="pairingCode = ''"
               >
-                Change number
+                Change Number
               </button>
             </div>
           </div>
@@ -540,9 +592,9 @@ async function handleRemove() {
         <!-- ────────────────────────────────────────── -->
         <!-- OPTION B: SCAN QR CODE (IF ON LAPTOP/PC)  -->
         <!-- ────────────────────────────────────────── -->
-        <div v-else class="text-center space-y-4 py-1">
+        <div v-else class="text-center space-y-3 py-1">
           <div v-if="botStatus.qr" class="space-y-3">
-            <div class="w-60 h-60 mx-auto bg-white rounded-2xl shadow-lg border border-slate-200 flex items-center justify-center p-2.5">
+            <div class="w-56 h-56 mx-auto bg-white rounded-2xl shadow-md border border-slate-200 flex items-center justify-center p-2.5">
               <img :src="botStatus.qr" alt="WhatsApp QR Code" class="w-full h-full object-contain rounded-xl" />
             </div>
 
@@ -556,7 +608,7 @@ async function handleRemove() {
 
           <div v-else class="py-8 space-y-2 text-slate-400">
             <i class="fa-solid fa-circle-notch fa-spin text-xl text-emerald-500"></i>
-            <p class="text-xs">Generating QR code...</p>
+            <p class="text-xs">Preparing QR code...</p>
           </div>
         </div>
 

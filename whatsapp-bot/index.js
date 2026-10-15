@@ -71,18 +71,27 @@ let botState = {
   hasDrive: Boolean(drive),
 }
 let cachedGroups = []
+let lastGroupsFetch = 0
 
-async function refreshGroups() {
+async function refreshGroups(force = false) {
   if (!sock || botState.status !== 'connected') return cachedGroups
+  // Cache for 60s to prevent WhatsApp rate-overlimit on frequent polls
+  if (cachedGroups.length > 0 && !force && (Date.now() - lastGroupsFetch < 60_000)) {
+    return cachedGroups
+  }
   try {
     const raw = await sock.groupFetchAllParticipating()
+    lastGroupsFetch = Date.now()
     cachedGroups = Object.entries(raw).map(([id, m]) => ({
       id,
       name: m.subject || 'Unnamed Group',
       participantsCount: Array.isArray(m.participants) ? m.participants.length : 0,
     })).sort((a, b) => a.name.localeCompare(b.name))
   } catch (e) {
-    console.warn('[Bot] Could not fetch groups:', e.message)
+    // If rate-limited, silently return existing cached groups
+    if (!e.message?.includes('rate-overlimit')) {
+      console.warn('[Bot] Could not fetch groups:', e.message)
+    }
   }
   return cachedGroups
 }
@@ -221,9 +230,20 @@ async function handleIncomingMessage(msg) {
     if (mc.viewOnceMessageV2) mc = mc.viewOnceMessageV2.message
     if (mc.documentWithCaptionMessage) mc = mc.documentWithCaptionMessage.message
 
-    const isImage = Boolean(mc.imageMessage)
-    const isDoc   = Boolean(mc.documentMessage)
-    const isText  = Boolean(mc.conversation || mc.extendedTextMessage)
+    const isImageMsg = Boolean(mc.imageMessage)
+    const isDocMsg   = Boolean(mc.documentMessage)
+    const isText     = Boolean(mc.conversation || mc.extendedTextMessage)
+
+    // Detect if document is actually an image (uncompressed photo / raw / heic / png / etc.)
+    const docMime = (mc.documentMessage?.mimetype || '').toLowerCase()
+    const docName = (mc.documentMessage?.fileName || '').toLowerCase()
+    const isImageDoc = isDocMsg && (
+      docMime.startsWith('image/') ||
+      /\.(jpe?g|png|webp|gif|heic|heif|bmp|tiff?|svg|avif|raw|dng|ico)$/i.test(docName)
+    )
+
+    const isImage = isImageMsg || isImageDoc
+    const isDoc   = isDocMsg && !isImageDoc
 
     // Respect per-mapping content-type filters
     const allowImages = mapping2.allowImages !== false
@@ -233,20 +253,48 @@ async function handleIncomingMessage(msg) {
     if (isText && allowText) {
       const text = mc.conversation || mc.extendedTextMessage?.text || ''
       if (!text.trim()) return
-      console.log(`[Bot] Text message from "${mapping2.groupName}" → ${mapping2.subject}`)
+
+      const inboxItem = {
+        id: msg.key.id || `wa_txt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        semesterId: mapping2.semesterId,
+        subjectId: mapping2.subjectId,
+        semester: mapping2.semester,
+        exam: mapping2.exam,
+        subject: mapping2.subject,
+        groupName: mapping2.groupName,
+        senderName: msg.pushName || 'WhatsApp Member',
+        type: 'text',
+        text: text.trim(),
+        title: 'WhatsApp Notes',
+        createdAt: new Date().toISOString(),
+        timestamp: Date.now(),
+      }
+      inbox.push(inboxItem)
+      if (inbox.length > 100) inbox = inbox.slice(-100)
+      saveInbox(inbox)
+      console.log(`[Bot] Queued text note in inbox for "${mapping2.subject}": "${text.slice(0, 35)}..."`)
+      return
     }
 
     if (!isImage && !isDoc) return
     if (isImage && !allowImages) return
     if (isDoc && !allowFiles) return
 
-    const mediaMsg = isImage ? mc.imageMessage : mc.documentMessage
-    const mimeType = mediaMsg.mimetype || (isImage ? 'image/jpeg' : 'application/octet-stream')
-    const ext = mimeType.split('/')[1]?.split(';')[0] || (isImage ? 'jpg' : 'bin')
+    const mediaMsg = mc.imageMessage || mc.documentMessage
+    let mimeType = mediaMsg.mimetype || (isImage ? 'image/jpeg' : 'application/octet-stream')
+    if (isImage && !mimeType.startsWith('image/')) {
+      const extMatch = (mediaMsg.fileName || '').match(/\.([a-z0-9]+)$/i)
+      const extStr = extMatch ? extMatch[1].toLowerCase() : 'jpeg'
+      mimeType = `image/${extStr === 'jpg' ? 'jpeg' : extStr}`
+    }
+
+    const ext = (mediaMsg.fileName?.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase()) ||
+      mimeType.split('/')[1]?.split(';')[0]?.replace('jpeg', 'jpg') ||
+      (isImage ? 'jpg' : 'bin')
     const caption = mediaMsg.caption || ''
     const fileName = mediaMsg.fileName || `WA_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
 
-    console.log(`[Bot] Received ${isImage ? 'image' : 'file'} "${fileName}" for ${mapping2.semester} / ${mapping2.exam} / ${mapping2.subject}`)
+    console.log(`[Bot] Received ${isImage ? 'image (' + ext + ')' : 'file'} "${fileName}" for ${mapping2.semester} / ${mapping2.exam} / ${mapping2.subject}`)
 
     const buffer = await downloadMediaMessage(
       { key: msg.key, message: mc },
@@ -282,7 +330,7 @@ async function handleIncomingMessage(msg) {
       exam: mapping2.exam,
       subject: mapping2.subject,
       groupName: mapping2.groupName,
-      type: isImage ? 'image' : (isDoc ? 'file' : 'text'),
+      type: isImage ? 'photo' : (isDoc ? 'file' : 'text'),
       title: caption || fileName,
       caption: caption || '',
       fileName: fileName,

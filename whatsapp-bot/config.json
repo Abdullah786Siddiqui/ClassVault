@@ -17,6 +17,30 @@
       "semester": "Semester 1",
       "exam": "Midterm",
       "subject": "Data Structures"
+    },
+    {
+      "groupId": "120363284065738828@g.us",
+      "groupName": "Volta Team Group 1",
+      "subjectId": 1,
+      "semesterId": 1,
+      "semester": "Semester 1",
+      "exam": "mid-term",
+      "subject": "Biology",
+      "allowImages": true,
+      "allowFiles": true,
+      "allowText": true
+    },
+    {
+      "groupId": "120363413096694684@g.us",
+      "groupName": "Class vault Testing",
+      "subjectId": 2,
+      "semesterId": 1,
+      "semester": "Semester 1",
+      "exam": "mid-term",
+      "subject": "Math",
+      "allowImages": true,
+      "allowFiles": false,
+      "allowText": true
     }
   ],
   "saveLocalBackup": true,

@@ -88,11 +88,16 @@ let liveSyncTimer = null
 async function checkWhatsAppSync() {
   await syncIncomingWhatsAppItems((newItem) => {
     if (
-      Number(newItem.subjectId) === Number(route.params.subjectId) &&
-      newItem.exam === route.params.exam
+      newItem.forceReload ||
+      (Number(newItem.subjectId) === Number(route.params.subjectId) &&
+        newItem.exam === route.params.exam)
     ) {
       itemStore.loadSubjectItems(route.params.semesterId, route.params.subjectId, route.params.exam)
-      toast.success(`📷 New ${newItem.type} received from WhatsApp group!`)
+      // Active tab is strictly PRESERVED - never forcibly resets!
+      if (!newItem.forceReload) {
+        const typeLabel = newItem.type === 'photo' ? 'photo' : (newItem.type === 'file' ? 'document' : 'note')
+        toast.success(`📥 New ${typeLabel} received from WhatsApp!`)
+      }
     }
   })
 }
@@ -326,6 +331,7 @@ function openViewer(item) {
           v-for="item in notesList"
           :key="item.id"
           :item="item"
+          class="item-animate-in"
           @open="openViewer"
           @edit="openViewer"
           @delete="promptDeleteItem"
@@ -351,6 +357,7 @@ function openViewer(item) {
           v-for="item in photosList"
           :key="item.id"
           :item="item"
+          class="item-animate-in"
           @open="openViewer"
           @delete="promptDeleteItem"
         />
@@ -372,6 +379,7 @@ function openViewer(item) {
           v-for="item in filesList"
           :key="item.id"
           :item="item"
+          class="item-animate-in"
           @open="openViewer"
           @delete="promptDeleteItem"
         />
@@ -434,3 +442,20 @@ function openViewer(item) {
     />
   </div>
 </template>
+
+<style scoped>
+@keyframes itemAppear {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.item-animate-in {
+  animation: itemAppear 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+</style>

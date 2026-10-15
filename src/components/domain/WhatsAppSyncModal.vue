@@ -36,6 +36,7 @@ const isSaving = ref(false)
 const isInitialLoading = ref(true)
 const existingMapping = ref(null)
 const isChangingGroup = ref(false)
+const hasInitializedFilters = ref(false)
 
 // Pairing state
 const pairingMode = ref('phone') // 'phone' | 'qr'
@@ -73,9 +74,13 @@ async function loadData() {
           existingMapping.value = match
           selectedGroupId.value = match.groupId || ''
           selectedGroupName.value = match.groupName || ''
-          allowImages.value = match.allowImages !== false
-          allowFiles.value = match.allowFiles !== false
-          allowText.value = match.allowText === true
+          // Only initialize once on open so periodic polling doesn't wipe active clicks!
+          if (!hasInitializedFilters.value) {
+            allowImages.value = match.allowImages !== false
+            allowFiles.value = match.allowFiles !== false
+            allowText.value = match.allowText === true
+            hasInitializedFilters.value = true
+          }
         } else {
           existingMapping.value = null
         }
@@ -105,6 +110,7 @@ function stopPolling() {
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
     isChangingGroup.value = false
+    hasInitializedFilters.value = false
     selectedGroupId.value = ''
     selectedGroupName.value = ''
     existingMapping.value = null
@@ -164,6 +170,41 @@ function handleGroupSelect(group) {
   selectedGroupName.value = group.name || group.label
 }
 
+/* ── Toggle Content-Type Option ─────────────────────── */
+function toggleOption(key) {
+  if (key === 'images') allowImages.value = !allowImages.value
+  if (key === 'files') allowFiles.value = !allowFiles.value
+  if (key === 'text') allowText.value = !allowText.value
+}
+
+/* ── Update Settings & Close Modal ─────────────────── */
+async function handleUpdatePreferences() {
+  isSaving.value = true
+  try {
+    const mRes = await getWhatsAppMappings()
+    let allMappings = mRes?.mappings || []
+    const idx = allMappings.findIndex(
+      m => Number(m.subjectId) === Number(props.subjectId) || m.subject === props.subjectName
+    )
+    if (idx !== -1) {
+      allMappings[idx].allowImages = allowImages.value
+      allMappings[idx].allowFiles = allowFiles.value
+      allMappings[idx].allowText = allowText.value
+      existingMapping.value = { ...allMappings[idx] }
+      await saveWhatsAppMappings(allMappings)
+      toast.success('WhatsApp sync settings updated!')
+      emit('updated')
+      emit('close')
+    } else {
+      await handleSave()
+    }
+  } catch (err) {
+    toast.error(err.message || 'Failed to update preferences')
+  } finally {
+    isSaving.value = false
+  }
+}
+
 /* ── Save Mapping ────────────────────────────────── */
 async function handleSave() {
   if (!selectedGroupId.value) {
@@ -175,6 +216,19 @@ async function handleSave() {
   try {
     const mRes = await getWhatsAppMappings()
     let allMappings = mRes?.mappings || []
+
+    // ── Duplicate group check ──────────────────────────────────────────────
+    const conflict = allMappings.find(
+      m =>
+        m.groupId === selectedGroupId.value &&
+        Number(m.subjectId) !== Number(props.subjectId)
+    )
+    if (conflict) {
+      toast.error(`This group is already connected to "${conflict.subject}"`)
+      isSaving.value = false
+      return
+    }
+    // ──────────────────────────────────────────────────────────────────────
 
     allMappings = allMappings.filter(
       m => Number(m.subjectId) !== Number(props.subjectId) && m.subject !== props.subjectName
@@ -307,8 +361,8 @@ async function handleRemove() {
             <span class="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-800/80 text-emerald-700 dark:text-emerald-300 font-medium border border-emerald-200/50 dark:border-emerald-800/40">
               <i class="fa-solid fa-file-lines text-[10px] mr-1"></i> Files: {{ allowFiles ? 'Enabled' : 'Disabled' }}
             </span>
-            <span v-if="allowText" class="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-800/80 text-emerald-700 dark:text-emerald-300 font-medium border border-emerald-200/50 dark:border-emerald-800/40">
-              <i class="fa-solid fa-comment-dots text-[10px] mr-1"></i> Text: Enabled
+            <span class="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-800/80 text-emerald-700 dark:text-emerald-300 font-medium border border-emerald-200/50 dark:border-emerald-800/40">
+              <i class="fa-solid fa-comment-dots text-[10px] mr-1"></i> Text: {{ allowText ? 'Enabled' : 'Disabled' }}
             </span>
           </div>
 
@@ -368,11 +422,13 @@ async function handleRemove() {
 
           <div class="grid grid-cols-3 gap-2">
             <!-- 1. Images -->
-            <label
+            <button
+              type="button"
               class="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border cursor-pointer select-none transition-all duration-150"
               :class="allowImages
                 ? 'bg-sky-50 dark:bg-sky-950/30 border-sky-400 text-sky-800 dark:text-sky-200 ring-1 ring-sky-400/30'
                 : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:border-slate-300'"
+              @click="toggleOption('images')"
             >
               <div 
                 class="w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-colors"
@@ -381,21 +437,22 @@ async function handleRemove() {
                 <i class="fa-solid fa-image"></i>
               </div>
               <span class="text-xs font-bold">Images</span>
-              <input type="checkbox" v-model="allowImages" class="sr-only" />
               <div 
-                class="w-3.5 h-3.5 rounded border flex items-center justify-center transition-all"
+                class="w-4 h-4 rounded border flex items-center justify-center transition-all mt-0.5"
                 :class="allowImages ? 'bg-sky-500 border-sky-500 text-white' : 'border-slate-300 dark:border-slate-600'"
               >
-                <i v-if="allowImages" class="fa-solid fa-check text-[8px]"></i>
+                <i v-if="allowImages" class="fa-solid fa-check text-[9px]"></i>
               </div>
-            </label>
+            </button>
 
             <!-- 2. Files / PDFs -->
-            <label
+            <button
+              type="button"
               class="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border cursor-pointer select-none transition-all duration-150"
               :class="allowFiles
                 ? 'bg-violet-50 dark:bg-violet-950/30 border-violet-400 text-violet-800 dark:text-violet-200 ring-1 ring-violet-400/30'
                 : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:border-slate-300'"
+              @click="toggleOption('files')"
             >
               <div 
                 class="w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-colors"
@@ -404,21 +461,22 @@ async function handleRemove() {
                 <i class="fa-solid fa-file-lines"></i>
               </div>
               <span class="text-xs font-bold">Files / PDF</span>
-              <input type="checkbox" v-model="allowFiles" class="sr-only" />
               <div 
-                class="w-3.5 h-3.5 rounded border flex items-center justify-center transition-all"
+                class="w-4 h-4 rounded border flex items-center justify-center transition-all mt-0.5"
                 :class="allowFiles ? 'bg-violet-500 border-violet-500 text-white' : 'border-slate-300 dark:border-slate-600'"
               >
-                <i v-if="allowFiles" class="fa-solid fa-check text-[8px]"></i>
+                <i v-if="allowFiles" class="fa-solid fa-check text-[9px]"></i>
               </div>
-            </label>
+            </button>
 
             <!-- 3. Text Messages -->
-            <label
+            <button
+              type="button"
               class="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border cursor-pointer select-none transition-all duration-150"
               :class="allowText
                 ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 text-amber-800 dark:text-amber-200 ring-1 ring-amber-400/30'
                 : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:border-slate-300'"
+              @click="toggleOption('text')"
             >
               <div 
                 class="w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-colors"
@@ -427,14 +485,13 @@ async function handleRemove() {
                 <i class="fa-solid fa-comment-dots"></i>
               </div>
               <span class="text-xs font-bold">Text Msgs</span>
-              <input type="checkbox" v-model="allowText" class="sr-only" />
               <div 
-                class="w-3.5 h-3.5 rounded border flex items-center justify-center transition-all"
+                class="w-4 h-4 rounded border flex items-center justify-center transition-all mt-0.5"
                 :class="allowText ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 dark:border-slate-600'"
               >
-                <i v-if="allowText" class="fa-solid fa-check text-[8px]"></i>
+                <i v-if="allowText" class="fa-solid fa-check text-[9px]"></i>
               </div>
-            </label>
+            </button>
           </div>
 
           <p class="text-[11px] text-slate-400 leading-normal pt-1">
@@ -444,11 +501,24 @@ async function handleRemove() {
           </p>
         </div>
 
-        <!-- Action Link Button (visible when not already linked OR when editing) -->
+        <!-- Action Buttons -->
+        <!-- When group is already linked and NOT changing group: show Update Settings button -->
         <BaseButton
-          v-if="!existingMapping || isChangingGroup"
+          v-if="existingMapping && !isChangingGroup"
           variant="primary"
-          class="w-full bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-600/20 py-3 rounded-xl font-bold"
+          class="w-full bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-600/20 py-3 rounded-xl font-bold cursor-pointer"
+          :disabled="isSaving"
+          @click="handleUpdatePreferences"
+        >
+          <i class="fa-solid fa-check mr-2"></i>
+          <span>{{ isSaving ? 'Updating Settings...' : 'Update Settings' }}</span>
+        </BaseButton>
+
+        <!-- When linking for the first time OR changing to a new group: show Link / Update Link button -->
+        <BaseButton
+          v-else
+          variant="primary"
+          class="w-full bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-600/20 py-3 rounded-xl font-bold cursor-pointer"
           :disabled="!selectedGroupId || isSaving"
           @click="handleSave"
         >

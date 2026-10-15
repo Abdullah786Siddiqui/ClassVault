@@ -41,7 +41,7 @@ window.addEventListener('online', async () => {
   await syncStore.refreshCounts()
   await authStore.checkAndRefreshToken()
   if (authStore.signedIn) {
-    await syncStore.syncNow()
+    await syncStore.syncNow({ fullMirror: true })
   }
 })
 
@@ -50,7 +50,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && navigator.onLine) {
     authStore.checkAndRefreshToken().then(() => {
       if (authStore.signedIn) {
-        useSyncStore(pinia).syncNow().catch((error) => {
+        useSyncStore(pinia).syncNow({ fullMirror: true }).catch((error) => {
           console.error('[ClassVault] Failed to refresh the Drive mirror:', error)
         })
       }

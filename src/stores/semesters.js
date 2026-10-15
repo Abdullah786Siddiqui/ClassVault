@@ -13,6 +13,7 @@ import {
   getStoredUserEmail,
 } from '../services/drive'
 import { hasPreviouslyConnected } from '../services/auth'
+import { getWhatsAppMappings, saveWhatsAppMappings } from '../services/whatsapp'
 
 async function removeItemsLocally(items) {
   for (const item of items) {
@@ -178,6 +179,17 @@ export const useSemesterStore = defineStore('semester', {
         throw err
       }
 
+      // Also clean up any WhatsApp mappings for this semester
+      try {
+        const res = await getWhatsAppMappings()
+        if (res?.ok && Array.isArray(res.mappings)) {
+          const updated = res.mappings.filter((m) => Number(m.semesterId) !== Number(id))
+          if (updated.length !== res.mappings.length) {
+            await saveWhatsAppMappings(updated)
+          }
+        }
+      } catch {}
+
       const semesterIdNum = Number(id)
       await db.transaction('rw', db.semesters, db.subjects, db.items, db.filesCache, async () => {
         await removeItemsLocally(itemsToDelete)
@@ -228,6 +240,17 @@ export const useSemesterStore = defineStore('semester', {
       } catch (err) {
         throw err
       }
+
+      // Also clean up any WhatsApp mapping for this subject so it doesn't linger in bot config
+      try {
+        const res = await getWhatsAppMappings()
+        if (res?.ok && Array.isArray(res.mappings)) {
+          const updated = res.mappings.filter((m) => Number(m.subjectId) !== Number(id))
+          if (updated.length !== res.mappings.length) {
+            await saveWhatsAppMappings(updated)
+          }
+        }
+      } catch {}
 
       await db.transaction('rw', db.subjects, db.items, db.filesCache, async () => {
         await removeItemsLocally(itemsToDelete)

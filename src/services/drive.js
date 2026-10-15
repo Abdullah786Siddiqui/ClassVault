@@ -77,14 +77,25 @@ export async function setStoredUserAccount(account) {
     window.localStorage.setItem(STORAGE_ACCOUNT_KEY, JSON.stringify(account))
     if (account.email) {
       window.localStorage.setItem(STORAGE_EMAIL_KEY, account.email)
+      window.localStorage.setItem('classvault.lastLoginEmail', account.email)
     }
   } catch {}
   try {
     await db.settings.put({ key: STORAGE_ACCOUNT_KEY, value: JSON.stringify(account) })
     if (account.email) {
       await db.settings.put({ key: STORAGE_EMAIL_KEY, value: account.email })
+      await db.settings.put({ key: 'classvault.lastLoginEmail', value: account.email })
     }
   } catch {}
+}
+
+export function getLastLoginEmail() {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem('classvault.lastLoginEmail') || ''
+  } catch {
+    return ''
+  }
 }
 
 export async function clearStoredAuth() {
@@ -113,7 +124,9 @@ export function getStoredUserEmail() {
   try {
     const account = getStoredUserAccount()
     if (account?.email) return account.email
-    return window.localStorage.getItem(STORAGE_EMAIL_KEY) || window.sessionStorage.getItem(STORAGE_EMAIL_KEY) || ''
+    const stored = window.localStorage.getItem(STORAGE_EMAIL_KEY) || window.sessionStorage.getItem(STORAGE_EMAIL_KEY)
+    if (stored) return stored
+    return getLastLoginEmail()
   } catch {
     return ''
   }

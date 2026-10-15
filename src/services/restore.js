@@ -118,7 +118,9 @@ export async function restoreLibraryFromDrive() {
   const files = await listDriveFiles(auth.accessToken)
 
   const byId = new Map(files.map((file) => [file.id, file]))
-  const localItems = await db.items.toArray()
+  const userEmail = getStoredUserEmail() || ''
+  const allLocal = await db.items.toArray()
+  const localItems = userEmail ? allLocal.filter((item) => !item.userEmail || item.userEmail === userEmail) : allLocal
   const existingByDriveId = new Map(
     localItems.filter((item) => item.driveFileId).map((item) => [item.driveFileId, item]),
   )
@@ -247,24 +249,33 @@ export async function restoreLibraryFromDrive() {
   )
 
   let actuallyRemoved = 0
-  // Safety guard: only remove items if we had a non-empty Drive crawl, and individually verify they are truly gone from Drive
-  if (removedItems.length && liveDriveIds.size > 0) {
+  if (removedItems.length) {
     const verifiedRemoved = []
     for (const item of removedItems) {
-      // If the item still has a local full blob, do not delete it!
-      if (item.blob) continue
+      if (liveDriveIds.size === 0) {
+        // All files deleted from Google Drive
+        verifiedRemoved.push(item)
+        continue
+      }
       try {
         const checkRes = await requestDriveUrl(
           `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.driveFileId)}?fields=id,trashed`,
           auth.accessToken,
         )
         const checkData = await checkRes.json()
-        if (checkData.trashed) {
+        if (checkData.trashed || checkData.error) {
           verifiedRemoved.push(item)
         }
       } catch (err) {
-        // 404 means truly deleted on Drive
-        if (err.message && (err.message.includes('404') || err.message.toLowerCase().includes('not found'))) {
+        // 404 or not found means deleted on Drive
+        if (
+          err.message &&
+          (err.message.includes('404') ||
+            err.message.toLowerCase().includes('not found') ||
+            err.message.toLowerCase().includes('deleted'))
+        ) {
+          verifiedRemoved.push(item)
+        } else if (!liveDriveIds.has(item.driveFileId)) {
           verifiedRemoved.push(item)
         }
       }
@@ -278,6 +289,25 @@ export async function restoreLibraryFromDrive() {
         }
       })
       actuallyRemoved = verifiedRemoved.length
+    }
+  }
+
+  // Prune empty subjects and semesters that belong to this user and have 0 items left
+  const remainingItems = await db.items.filter((i) => !userEmail || i.userEmail === userEmail).toArray()
+  const activeSubIds = new Set(remainingItems.map((i) => Number(i.subjectId)))
+  const activeSemIds = new Set(remainingItems.map((i) => Number(i.semesterId)))
+
+  const subjects = await db.subjects.filter((s) => !userEmail || s.userEmail === userEmail).toArray()
+  for (const sub of subjects) {
+    if (!activeSubIds.has(Number(sub.id))) {
+      await db.subjects.delete(sub.id)
+    }
+  }
+
+  const semesters = await db.semesters.filter((s) => !userEmail || s.userEmail === userEmail).toArray()
+  for (const sem of semesters) {
+    if (!activeSemIds.has(Number(sem.id))) {
+      await db.semesters.delete(sem.id)
     }
   }
 

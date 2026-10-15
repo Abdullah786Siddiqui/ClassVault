@@ -60,8 +60,8 @@ const formattedDate = computed(() => formatDate(props.item.createdAt))
         <SyncStatusBadge :status="item.syncStatus" />
       </div>
 
-      <!-- Delete action overlay -->
-      <div class="absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 sm-touch-actions">
+      <!-- Delete action overlay (always visible on touch/mobile) -->
+      <div class="absolute top-2 right-2 opacity-100 sm:opacity-0 transition-opacity sm:group-hover:opacity-100 focus-within:opacity-100">
         <IconButton
           :icon="Trash2"
           aria-label="Delete photo"
